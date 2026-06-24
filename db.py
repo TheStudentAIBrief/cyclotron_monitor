@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     top_features TEXT,
     PRIMARY KEY (run_at, component)
 );
+CREATE INDEX IF NOT EXISTS idx_events_code_ts ON events(code, timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 """
 
 def init_db(db_path: str):

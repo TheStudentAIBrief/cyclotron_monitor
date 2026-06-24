@@ -13,9 +13,12 @@ _COUNTER_RE = re.compile(r'(\w+) lifetime counter ([0-9.]+) is over (\d+)')
 
 def get_counter_days(component_label: str, db_path: str) -> tuple:
     conn = sqlite3.connect(db_path)
-    today = date.today()
     avg_cycle = AVG_CYCLES.get(component_label, 60)
     comp_key = COMPONENT_KEYS.get(component_label, '')
+
+    # Use last date in DB so counter projection aligns with available data
+    row_d = conn.execute("SELECT MAX(date) FROM beam_daily").fetchone()
+    today = date.fromisoformat(row_d[0]) if row_d and row_d[0] else date.today()
 
     row = conn.execute(
         "SELECT MAX(date(timestamp)) FROM maintenance_events WHERE component_label=?",
@@ -28,7 +31,7 @@ def get_counter_days(component_label: str, db_path: str) -> tuple:
         window_start = (today - timedelta(days=14)).isoformat()
         warnings = conn.execute(
             "SELECT timestamp, message FROM events WHERE code='11001' "
-            "AND message LIKE ? AND date(timestamp)>=? ORDER BY timestamp",
+            "AND message LIKE ? AND timestamp>=? ORDER BY timestamp",
             [f'%{comp_key}%', window_start]
         ).fetchall()
         conn.close()

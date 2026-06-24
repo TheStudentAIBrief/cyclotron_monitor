@@ -64,12 +64,14 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
                 features[f'{param}_{w}d_std'] = float(np.nanstd(y))
                 features[f'{param}_{w}d_slope'] = _slope(y)
 
+    # Use string prefix comparison so idx_events_code_ts can be used
+    # ISO timestamps sort lexicographically, so ts >= '2026-01-01' AND ts < '2026-01-08' is correct
     for code in IS_FAULT_CODES:
         for w, label in ((7, '7d'), (14, '14d')):
             start = (target_date - timedelta(days=w)).isoformat()
             cnt = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE date(timestamp)>=? AND date(timestamp)<? AND code=?",
-                [start, target_date.isoformat(), code]
+                "SELECT COUNT(*) FROM events WHERE code=? AND timestamp>=? AND timestamp<?",
+                [code, start, target_date.isoformat()]
             ).fetchone()[0]
             features[f'fault_is_{code}_{label}'] = int(cnt)
 
@@ -77,14 +79,14 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
         for w, label in ((7, '7d'), (14, '14d')):
             start = (target_date - timedelta(days=w)).isoformat()
             cnt = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE date(timestamp)>=? AND date(timestamp)<? AND code=?",
-                [start, target_date.isoformat(), code]
+                "SELECT COUNT(*) FROM events WHERE code=? AND timestamp>=? AND timestamp<?",
+                [code, start, target_date.isoformat()]
             ).fetchone()[0]
             features[f'fault_bl_{code}_{label}'] = int(cnt)
 
     start14 = (target_date - timedelta(days=14)).isoformat()
     cnt11001 = conn.execute(
-        "SELECT COUNT(*) FROM events WHERE date(timestamp)>=? AND date(timestamp)<? AND code='11001'",
+        "SELECT COUNT(*) FROM events WHERE code='11001' AND timestamp>=? AND timestamp<?",
         [start14, target_date.isoformat()]
     ).fetchone()[0]
     features['fault_11001_14d'] = int(cnt11001)
@@ -123,7 +125,7 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
     if component == 'BL2 Target 1':
         start7 = (target_date - timedelta(days=7)).isoformat()
         cnt_valve = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE date(timestamp)>=? AND date(timestamp)<? "
+            "SELECT COUNT(*) FROM events WHERE timestamp>=? AND timestamp<? "
             "AND message LIKE ?",
             [start7, target_date.isoformat(), f'%{VALVE_CHANNEL}%']
         ).fetchone()[0]
