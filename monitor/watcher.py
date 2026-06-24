@@ -50,9 +50,14 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
     COMPONENTS = ['ION SOURCE', 'FOILS', 'BL1 Target 1', 'BL2 Target 1']
 
     def _refresh():
+        conn_r = sqlite3.connect(db_path)
+        row_d = conn_r.execute("SELECT MAX(date) FROM beam_daily").fetchone()
+        conn_r.close()
+        target_date = date_type.fromisoformat(row_d[0]) if row_d and row_d[0] else date_type.today()
+
         preds = []
         for comp in COMPONENTS:
-            feats = build_features(date_type.today(), comp, db_path)
+            feats = build_features(target_date, comp, db_path)
             counter_days, _ = get_counter_days(comp, db_path)
             conn = sqlite3.connect(db_path)
             row = conn.execute(
