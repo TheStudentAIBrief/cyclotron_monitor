@@ -58,8 +58,9 @@ def test_predictor_risk_score_between_0_and_1(tmp_path):
     assert 0.0 <= result.risk_score <= 1.0
 
 
-def _build_synthetic_db(tmp_path, n_cycles=3, cycle_len=46):
-    import numpy as np
+def _build_synthetic_db(tmp_path, n_cycles=4, cycle_len=46):
+    # Include all 5 IS params so features have <30% NaN and rows aren't filtered out
+    IS_PARAMS = ['AI_IS_CUR', 'AI_IS_VOLT', 'AI_BIAS_VOLT', 'AI_BIAS_CUR', 'AI_BOP_CUR']
     start = date(2024, 10, 1)
     beam_rows, maint_rows = [], []
     for cycle in range(n_cycles):
@@ -67,8 +68,9 @@ def _build_synthetic_db(tmp_path, n_cycles=3, cycle_len=46):
         for d_offset in range(cycle_len):
             d = start + timedelta(days=cycle * cycle_len + d_offset)
             is_val = 2.0 if d_offset < cycle_len - 14 else 2.0 - 0.1 * (d_offset - (cycle_len - 14))
-            beam_rows += make_beam_rows(d + timedelta(days=1), 1, 'AI_IS_CUR', max(0.1, is_val))
-            beam_rows += make_beam_rows(d + timedelta(days=1), 1, 'AI_BOP_CUR', 6.0)
+            for param in IS_PARAMS:
+                val = max(0.1, is_val) if param == 'AI_IS_CUR' else 2.0
+                beam_rows += make_beam_rows(d + timedelta(days=1), 1, param, val)
         maint_rows.append((f"{maint_date.isoformat()} 10:00:00",
                            'isc_amphrs', 'ION SOURCE', 'hyper.log'))
     return setup_test_db(tmp_path, beam_rows=beam_rows, maint_rows=maint_rows)
