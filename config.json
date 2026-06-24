@@ -1,0 +1,7 @@
+{
+  "log_dir": "C:\\Users\\theol\\cyclotron_data\\raw",
+  "db_path": "C:\\Users\\theol\\cyclotron_monitor\\data\\cyclotron.db",
+  "model_dir": "C:\\Users\\theol\\cyclotron_monitor\\data\\models",
+  "dashboard_path": "C:\\Users\\theol\\cyclotron_monitor\\data\\dashboard.json",
+  "alert_path": "C:\\Users\\theol\\cyclotron_data\\ALERT.txt"
+}

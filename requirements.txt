@@ -1,0 +1,4 @@
+pandas>=2.0
+scikit-learn>=1.4
+watchdog>=4.0
+matplotlib>=3.8

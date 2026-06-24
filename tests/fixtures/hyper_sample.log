@@ -1,0 +1,6 @@
+04:49:06, debug: rfcConnect: error 2 opening /dev/ttyUSB0
+04:49:06, archSync: IO Channel DO_BL2_TSU3_VALVE6 set to ON
+04:50:07, archSync: IO Channel DO_BL2_TSU3_VALVE6 set to OFF
+17:14:57, warning 12072: checkTankVacuum: High tank pressure 7.7e-06!
+20:45:05, warning 10804: checkISwarnings: Ion Source appears to be open.
+08:00:00, warning 11001: checkLifetime: isc_amphrs lifetime counter 10234 is over 9999

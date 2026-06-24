@@ -1,0 +1,3 @@
+05:00:00, note: cmdAddToQueue: setlifetime {"isc_amphrs":0}
+05:00:01, note: cmdProc: setlifetime {"isc_amphrs":0}
+06:00:00, note: cmdAddToQueue: setlifetime {"bl1_foil1_uamphrs":0}
