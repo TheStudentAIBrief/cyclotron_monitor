@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 from models.predictor import PredictionResult
 from monitor.dashboard_writer import write_dashboard
-from monitor.watcher import LogWatcher
 
 
 def _make_pred(component, days, alert_level):
@@ -46,6 +45,7 @@ def test_alert_txt_not_written_when_all_green(tmp_path):
 
 
 def test_watcher_detects_new_log_file(tmp_path):
+    from monitor.watcher import LogWatcher
     detected = []
     watcher = LogWatcher(str(tmp_path), on_file=lambda p: detected.append(p))
     watcher.start()

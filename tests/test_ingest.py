@@ -41,4 +41,4 @@ def test_ingest_is_idempotent(tmp_path):
     conn = sqlite3.connect(db)
     rows = conn.execute("SELECT COUNT(*) FROM maintenance_events").fetchone()[0]
     conn.close()
-    assert rows == 1, "Second ingest must not duplicate rows"
+    assert rows == 2, "Second ingest must not duplicate rows (2 unique events in fixture)"
