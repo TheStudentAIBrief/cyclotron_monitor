@@ -65,6 +65,18 @@ def cmd_predict(cfg):
     print(f"Open ui/index.html in a browser to view.")
 
 
+def cmd_train_only(cfg):
+    """Run only the model training phase (skip ingest — use when DB is already populated)."""
+    from models.trainer import train_component, COMPONENTS
+    from features.engineer import build_features
+    from db import init_db
+    init_db(cfg['db_path'])  # ensures indices exist
+    print("=== Training models (ingest skipped) ===")
+    for comp in COMPONENTS:
+        ok = train_component(comp, cfg['db_path'], cfg['model_dir'], build_features)
+        print(f"  {comp}: {'MODEL' if ok else 'COUNTER-ONLY'}")
+
+
 def cmd_monitor(cfg):
     from monitor.watcher import start_monitor
     start_monitor(
@@ -81,10 +93,11 @@ def cmd_patterns(cfg):
 
 
 COMMANDS = {
-    'train':    cmd_train,
-    'predict':  cmd_predict,
-    'monitor':  cmd_monitor,
-    'patterns': cmd_patterns,
+    'train':      cmd_train,
+    'train-only': cmd_train_only,
+    'predict':    cmd_predict,
+    'monitor':    cmd_monitor,
+    'patterns':   cmd_patterns,
 }
 
 if __name__ == '__main__':
