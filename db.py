@@ -40,6 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
 
 def init_db(db_path: str):
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
