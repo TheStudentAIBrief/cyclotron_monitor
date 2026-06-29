@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     platform      TEXT DEFAULT '',
     registered_at TEXT NOT NULL
 );
+
+-- Populated by the on-prem data bridge (monitor/cloud_sync.py).
+-- Stores the full dashboard JSON blob per lab; GET /api/dashboard reads from here.
+CREATE TABLE IF NOT EXISTS synced_dashboard (
+    lab_id    TEXT PRIMARY KEY,
+    payload   TEXT NOT NULL,
+    synced_at TEXT NOT NULL
+);
 """
 
 

@@ -1,0 +1,338 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet, TextInput, Switch,
+  ScrollView, Image, ActivityIndicator,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import {
+  submitGaugePhoto, submitManualGauge, getGauges, GaugeReading,
+} from '../../services/api';
+
+export default function GaugesScreen() {
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [ocrText, setOcrText] = useState<string | null>(null);
+  const [gaugeName, setGaugeName] = useState('');
+  const [value, setValue] = useState('');
+  const [unit, setUnit] = useState('');
+  const [isAlert, setIsAlert] = useState(false);
+  const [alertReason, setAlertReason] = useState('');
+  const [capturing, setCapturing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [history, setHistory] = useState<GaugeReading[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await getGauges(1);
+      setHistory(res.items);
+    } catch { /* history is non-critical */ }
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  async function capturePhoto() {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setMessage({ text: 'Camera permission is required to log gauges.', ok: false });
+      return;
+    }
+    setCapturing(true);
+    setMessage(null);
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        base64: true,
+        quality: 0.8,
+        allowsEditing: false,
+      });
+      if (result.canceled || !result.assets[0].base64) return;
+
+      setPhotoUri(result.assets[0].uri);
+      const ocr = await submitGaugePhoto(result.assets[0].base64, gaugeName) as Record<string, unknown>;
+      setOcrText(String(ocr.raw_ocr_text ?? ''));
+      if (ocr.value != null) setValue(String(ocr.value));
+      if (ocr.unit) setUnit(String(ocr.unit));
+      if (ocr.is_alert) setIsAlert(true);
+    } catch (e: unknown) {
+      setMessage({ text: e instanceof Error ? e.message : 'Photo capture failed', ok: false });
+    } finally {
+      setCapturing(false);
+    }
+  }
+
+  async function handleSave() {
+    if (!gaugeName.trim()) {
+      setMessage({ text: 'Enter a gauge name before saving.', ok: false });
+      return;
+    }
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) {
+      setMessage({ text: 'Enter a numeric value.', ok: false });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      await submitManualGauge({
+        gauge_name: gaugeName.trim(),
+        value: numValue,
+        unit: unit.trim(),
+        is_alert: isAlert,
+        alert_reason: alertReason.trim(),
+      });
+      setMessage({ text: 'Reading saved.', ok: true });
+      // Reset form
+      setPhotoUri(null);
+      setOcrText(null);
+      setValue('');
+      setUnit('');
+      setIsAlert(false);
+      setAlertReason('');
+      await loadHistory();
+    } catch (e: unknown) {
+      setMessage({ text: e instanceof Error ? e.message : 'Save failed', ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+      <View style={styles.section}>
+
+        {/* Camera capture */}
+        <TouchableOpacity
+          style={styles.captureBtn}
+          onPress={capturePhoto}
+          disabled={capturing || saving}
+          activeOpacity={0.8}
+        >
+          {capturing
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.captureBtnText}>📷  Photograph Gauge</Text>
+          }
+        </TouchableOpacity>
+
+        {/* Photo preview */}
+        {photoUri && (
+          <Image source={{ uri: photoUri }} style={styles.preview} resizeMode="contain" />
+        )}
+
+        {/* OCR result */}
+        {ocrText != null && (
+          <View style={styles.ocrBox}>
+            <Text style={styles.ocrLabel}>OCR Result</Text>
+            <Text style={styles.ocrText}>
+              {ocrText || 'No text detected — enter reading manually below'}
+            </Text>
+          </View>
+        )}
+
+        {/* Manual entry form */}
+        <Text style={styles.fieldLabel}>Gauge Name *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Vacuum Pump Pressure"
+          placeholderTextColor="#444"
+          value={gaugeName}
+          onChangeText={setGaugeName}
+        />
+
+        <View style={styles.rowFields}>
+          <View style={styles.valueField}>
+            <Text style={styles.fieldLabel}>Reading *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="0.00"
+              placeholderTextColor="#444"
+              keyboardType="decimal-pad"
+              value={value}
+              onChangeText={setValue}
+            />
+          </View>
+          <View style={styles.unitField}>
+            <Text style={styles.fieldLabel}>Unit</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="mbar"
+              placeholderTextColor="#444"
+              value={unit}
+              onChangeText={setUnit}
+            />
+          </View>
+        </View>
+
+        <View style={styles.alertRow}>
+          <Text style={styles.fieldLabel}>Mark as Alert</Text>
+          <Switch
+            value={isAlert}
+            onValueChange={setIsAlert}
+            trackColor={{ false: '#2a2a5a', true: '#6b1d1d' }}
+            thumbColor={isAlert ? '#ff6b6b' : '#555'}
+          />
+        </View>
+
+        {isAlert && (
+          <>
+            <Text style={styles.fieldLabel}>Alert Reason</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Describe the issue"
+              placeholderTextColor="#444"
+              value={alertReason}
+              onChangeText={setAlertReason}
+            />
+          </>
+        )}
+
+        {message && (
+          <Text style={[styles.msg, message.ok ? styles.msgOk : styles.msgErr]}>
+            {message.text}
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={[styles.saveBtn, (saving || capturing) && { opacity: 0.55 }]}
+          onPress={handleSave}
+          disabled={saving || capturing}
+          activeOpacity={0.8}
+        >
+          {saving
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.saveBtnText}>Save Reading</Text>
+          }
+        </TouchableOpacity>
+      </View>
+
+      {/* History */}
+      <View style={styles.history}>
+        <Text style={styles.historyTitle}>Recent Readings</Text>
+        {history.length === 0
+          ? <Text style={styles.empty}>No readings yet.</Text>
+          : history.map(item => (
+            <View key={item.id} style={styles.histItem}>
+              <View style={styles.histHeader}>
+                <Text style={styles.histGauge}>{item.gauge_name || 'Unnamed'}</Text>
+                {item.is_alert ? (
+                  <View style={styles.alertPill}>
+                    <Text style={styles.alertPillText}>ALERT</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.histValue}>
+                {item.value != null
+                  ? `${item.value}${item.unit ? ' ' + item.unit : ''}`
+                  : 'No reading extracted'}
+              </Text>
+              <Text style={styles.histTs}>
+                {item.timestamp.slice(0, 19).replace('T', ' ')} UTC
+              </Text>
+              {item.alert_reason ? (
+                <Text style={styles.histReason}>{item.alert_reason}</Text>
+              ) : null}
+            </View>
+          ))
+        }
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  section: { padding: 16 },
+
+  captureBtn: {
+    backgroundColor: '#1a73e8',
+    borderRadius: 10,
+    paddingVertical: 18,
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  captureBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
+  preview: {
+    width: '100%',
+    height: 200,
+    backgroundColor: '#0d0d1f',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+
+  ocrBox: {
+    backgroundColor: '#0d1a2e',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#1e3a5f',
+  },
+  ocrLabel: { color: '#4a9eff', fontSize: 10, fontWeight: '600', marginBottom: 5, textTransform: 'uppercase' },
+  ocrText: { color: '#aaa', fontSize: 13 },
+
+  fieldLabel: { color: '#888', fontSize: 12, marginBottom: 5, marginTop: 12 },
+  input: {
+    backgroundColor: '#0d0d1f',
+    color: '#e0e0e0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2a2a5a',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+  },
+  rowFields: { flexDirection: 'row', gap: 8 },
+  valueField: { flex: 2 },
+  unitField: { flex: 1 },
+  alertRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+
+  msg: { fontSize: 13, textAlign: 'center', marginTop: 10, padding: 8, borderRadius: 6, overflow: 'hidden' },
+  msgOk: { backgroundColor: '#1d4d2e', color: '#7aff7a' },
+  msgErr: { backgroundColor: '#3a0a0a', color: '#ff6b6b' },
+
+  saveBtn: {
+    backgroundColor: '#1d6b3e',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+
+  history: { padding: 16, paddingTop: 4 },
+  historyTitle: {
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  histItem: {
+    backgroundColor: '#16213e',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#2a2a5a',
+  },
+  histHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  histGauge: { color: '#ccc', fontSize: 14, fontWeight: '600', flex: 1 },
+  alertPill: { backgroundColor: '#6b1d1d', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  alertPillText: { color: '#ff6b6b', fontSize: 10, fontWeight: '700' },
+  histValue: { color: '#e0e0e0', fontSize: 18, fontWeight: '700', marginBottom: 3 },
+  histTs: { color: '#555', fontSize: 11 },
+  histReason: { color: '#ffb347', fontSize: 12, marginTop: 4 },
+  empty: { color: '#555', textAlign: 'center', marginTop: 20 },
+});

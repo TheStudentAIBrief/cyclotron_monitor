@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: petlab-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: API_SECRET_KEY
+        generateValue: true
+      - key: CLOUD_SYNC_KEY
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /data/petlab.db
+      - key: LAB_ID
+        value: petlabs-pretoria
+    disk:
+      name: petlab-data
+      mountPath: /data
+      sizeGB: 1

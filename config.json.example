@@ -5,6 +5,7 @@
   "dashboard_path": "C:\\Path\\To\\cyclotron_monitor\\data\\dashboard.json",
   "alert_path":     "C:\\Path\\To\\Cyclotron\\ALERT.txt",
 
-  "lab_id":         "petlabs-pretoria",
-  "cloud_api_url":  "https://your-api-host.example.com"
+  "lab_id":          "petlabs-pretoria",
+  "cloud_api_url":   "https://petlab-api.onrender.com",
+  "cloud_sync_key":  "paste-the-CLOUD_SYNC_KEY-from-render-here"
 }

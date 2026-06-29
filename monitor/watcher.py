@@ -10,6 +10,7 @@ from parsers.beam_parser import parse_beam_file, aggregate_daily
 from parsers.hyper_parser import parse_hyper_file
 from parsers.maintenance_labels import extract_maintenance_events, extract_from_file
 from db import init_db, upsert_beam_daily, insert_events, upsert_maintenance_event
+from monitor.cloud_sync import sync_if_configured
 
 _log = logging.getLogger('cyclotron.watcher')
 
@@ -128,6 +129,7 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
                 del processed[p]
 
             _log.info('Dashboard updated (%d components)', len(preds))
+            sync_if_configured(dashboard_path)
         finally:
             _refresh_lock.release()
 

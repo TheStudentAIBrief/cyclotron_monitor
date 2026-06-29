@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "PET Lab Monitor",
+    "slug": "petlab-monitor",
+    "version": "1.0.0",
+    "scheme": "petlabmonitor",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.petlabs.monitor",
+      "infoPlist": {
+        "NSCameraUsageDescription": "PET Lab Monitor uses the camera to photograph gauges and log readings.",
+        "NSPhotoLibraryUsageDescription": "PET Lab Monitor can access photos to select gauge images for logging."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "com.petlabs.monitor",
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow PET Lab Monitor to access your photos.",
+          "cameraPermission": "Allow PET Lab Monitor to use the camera to log gauge readings."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1a73e8"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
