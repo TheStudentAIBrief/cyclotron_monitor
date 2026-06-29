@@ -109,7 +109,7 @@ def ask(req: AskRequest, user: dict = Depends(get_current_user)):
                 'stream': False,
                 'options': {'temperature': 0.2},
             },
-            timeout=180,
+            timeout=300,
         )
         r.raise_for_status()
         answer = (r.json().get('response') or '').strip()

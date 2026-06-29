@@ -73,15 +73,15 @@ export interface Paged<T> {
 // so use an explicit AbortController + setTimeout. Without this, an unreachable
 // API host makes fetch() hang on the OS TCP connect timeout (tens of seconds),
 // which freezes the loading screens and shows "taking longer than expected".
-async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeout = Config.API_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Config.API_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {
       throw new Error(
-        `Server did not respond within ${Math.round(Config.API_TIMEOUT_MS / 1000)}s. ` +
+        `Server did not respond within ${Math.round(timeout / 1000)}s. ` +
         `Check that the API is running and reachable at ${Config.API_URL}.`,
       );
     }
@@ -93,7 +93,7 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
 
 // ─── Core request ─────────────────────────────────────────────────────────────
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeout = Config.API_TIMEOUT_MS): Promise<T> {
   const token = await getAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -101,7 +101,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.headers as Record<string, string> ?? {}),
   };
 
-  let res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers });
+  let res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers }, timeout);
 
   if (res.status === 401 && token) {
     // Access token expired — attempt refresh then retry once
@@ -109,7 +109,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       await refreshAccessToken();
       const newToken = await getAccessToken();
       const retryHeaders = { ...headers, Authorization: `Bearer ${newToken ?? ''}` };
-      res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers: retryHeaders });
+      res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers: retryHeaders }, timeout);
     } catch {
       await logout();
       throw new Error('Session expired. Please log in again.');
@@ -185,7 +185,7 @@ export const askAI = (question: string) =>
   request<{ answer: string; model: string }>('/api/ask', {
     method: 'POST',
     body: JSON.stringify({ question }),
-  });
+  }, Config.API_ASK_TIMEOUT_MS);
 
 // ─── Push notifications ───────────────────────────────────────────────────────
 

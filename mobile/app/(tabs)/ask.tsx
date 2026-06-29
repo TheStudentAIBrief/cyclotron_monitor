@@ -101,7 +101,7 @@ export default function AskAIScreen() {
         {loading && (
           <View style={styles.thinking}>
             <ActivityIndicator size="small" color="#4a9eff" />
-            <Text style={styles.thinkingText}>Thinking… up to ~60 s</Text>
+            <Text style={styles.thinkingText}>Thinking… up to ~5 min on CPU</Text>
           </View>
         )}
 
