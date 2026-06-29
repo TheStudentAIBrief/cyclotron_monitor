@@ -3,7 +3,7 @@
     "name": "PET Lab Monitor",
     "slug": "petlab-monitor",
     "version": "1.0.0",
-    "scheme": "petlabmonitor",
+    "scheme": "petlab",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",

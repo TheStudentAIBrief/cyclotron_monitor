@@ -33,7 +33,10 @@ export default function ComponentCard({ data }: { data: ComponentData }) {
       <View style={styles.barBg}>
         <View style={[styles.barFill, { width: `${pct}%`, backgroundColor: barColor }]} />
       </View>
-      <Text style={styles.barLabel}>{pct.toFixed(0)}% of service interval used</Text>
+      <Text style={styles.barLabel}>
+        {pct.toFixed(0)}% of service interval used
+        {data.risk_score != null ? ` · risk ${(data.risk_score * 100).toFixed(0)}%` : ''}
+      </Text>
 
       {/* Last maintenance */}
       <View style={styles.row}>

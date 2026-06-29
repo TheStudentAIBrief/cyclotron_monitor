@@ -13,7 +13,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
-from api.routes import dashboard, gauges, push, records, sync
+from api.routes import ask, dashboard, gauges, push, records, sync
 
 
 @asynccontextmanager
@@ -57,6 +57,7 @@ app.include_router(dashboard.router, prefix='/api', dependencies=_auth)
 app.include_router(gauges.router,    prefix='/api', dependencies=_auth)
 app.include_router(records.router,   prefix='/api', dependencies=_auth)
 app.include_router(push.router,      prefix='/api', dependencies=_auth)
+app.include_router(ask.router,       prefix='/api', dependencies=_auth)
 
 # Sync endpoint is protected by X-Sync-Key header (not JWT) — server-to-server only.
 app.include_router(sync.router, prefix='')

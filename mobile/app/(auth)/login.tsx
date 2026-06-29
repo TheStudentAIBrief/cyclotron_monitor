@@ -3,15 +3,15 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { login } from '../../services/auth';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const router = useRouter();
+  const { setAuthed } = useAuth();
 
   async function handleLogin() {
     if (!username.trim() || !password) {
@@ -22,7 +22,10 @@ export default function LoginScreen() {
     setError('');
     try {
       await login(username.trim(), password);
-      router.replace('/(tabs)');
+      // Update root layout state — it owns all navigation decisions.
+      // Calling router.replace here would race with the root layout's redirect
+      // effect (which still sees authed=false) and boot the user back to login.
+      setAuthed(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Login failed');
     } finally {

@@ -27,6 +27,11 @@ export default function RecordsScreen() {
   const [search, setSearch] = useState('');
 
   const load = useCallback(async (pull = false) => {
+    // Clear stale items immediately on non-pull loads (e.g. tab switch).
+    // Without this, the FlatList briefly renders items from the previous tab
+    // through the new tab's render function — field names differ across types
+    // (MaintenanceEvent.timestamp vs PredictionRecord.run_at), causing a crash.
+    if (!pull) setItems([]);
     pull ? setRefreshing(true) : setLoading(true);
     setError('');
     const q = search.trim() || undefined;
@@ -116,7 +121,7 @@ export default function RecordsScreen() {
           <TouchableOpacity
             key={t.key}
             style={[styles.tab, activeTab === t.key && styles.tabActive]}
-            onPress={() => setActiveTab(t.key)}
+            onPress={() => { setItems([]); setActiveTab(t.key); }}
             activeOpacity={0.7}
           >
             <Text style={[styles.tabText, activeTab === t.key && styles.tabTextActive]}>

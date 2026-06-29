@@ -68,6 +68,29 @@ export interface Paged<T> {
   items: T[];
 }
 
+// ─── Fetch with timeout ───────────────────────────────────────────────────────
+// Hermes (React Native 0.76) does not reliably implement AbortSignal.timeout(),
+// so use an explicit AbortController + setTimeout. Without this, an unreachable
+// API host makes fetch() hang on the OS TCP connect timeout (tens of seconds),
+// which freezes the loading screens and shows "taking longer than expected".
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Config.API_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error(
+        `Server did not respond within ${Math.round(Config.API_TIMEOUT_MS / 1000)}s. ` +
+        `Check that the API is running and reachable at ${Config.API_URL}.`,
+      );
+    }
+    throw new Error(`Cannot reach server at ${Config.API_URL}. Check your network connection.`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Core request ─────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -78,7 +101,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.headers as Record<string, string> ?? {}),
   };
 
-  let res = await fetch(`${Config.API_URL}${path}`, { ...options, headers });
+  let res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers });
 
   if (res.status === 401 && token) {
     // Access token expired — attempt refresh then retry once
@@ -86,11 +109,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       await refreshAccessToken();
       const newToken = await getAccessToken();
       const retryHeaders = { ...headers, Authorization: `Bearer ${newToken ?? ''}` };
-      res = await fetch(`${Config.API_URL}${path}`, { ...options, headers: retryHeaders });
+      res = await fetchWithTimeout(`${Config.API_URL}${path}`, { ...options, headers: retryHeaders });
     } catch {
       await logout();
       throw new Error('Session expired. Please log in again.');
     }
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    // Refresh failed, or there was never a usable token — force re-login
+    // instead of surfacing a raw status. The retry above is not re-handled,
+    // so this cannot infinite-loop.
+    await logout();
+    throw new Error('Session expired. Please log in again.');
   }
 
   if (!res.ok) {
@@ -147,6 +178,14 @@ export const getEvents = (page = 1, code?: string) => {
   if (code) p.set('code', code);
   return request<Paged<FaultEvent>>(`/api/records/events?${p}`);
 };
+
+// ─── Ask AI ───────────────────────────────────────────────────────────────────
+
+export const askAI = (question: string) =>
+  request<{ answer: string; model: string }>('/api/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
 
 // ─── Push notifications ───────────────────────────────────────────────────────
 

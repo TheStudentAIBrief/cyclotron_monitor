@@ -1,8 +1,10 @@
 import base64
+import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -11,6 +13,29 @@ from api.config import get_config
 from api.db_cloud import get_conn
 
 router = APIRouter()
+
+_OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+_OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', 'qwen2.5vl:7b').strip()
+
+_OCR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_gauge": {"type": "boolean"},
+        "reading_value": {"type": "number"},
+        "unit": {"type": "string"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "needle_reasoning": {"type": "string"},
+    },
+    "required": ["is_gauge", "reading_value", "unit", "confidence", "needle_reasoning"],
+    "additionalProperties": False,
+}
+
+_OCR_PROMPT = (
+    "Read the pressure gauge in this photo taken in a PET lab cyclotron facility. "
+    "Identify the needle position against the printed scale. Report the numeric reading "
+    "and units exactly as printed on the dial. If no gauge is present set is_gauge=false "
+    "and reading_value=0."
+)
 
 
 class PhotoRequest(BaseModel):
@@ -27,21 +52,46 @@ class ManualReadingRequest(BaseModel):
 
 
 def _run_ocr(photo_b64: str) -> dict:
-    """
-    Extract a numeric reading from a gauge photo.
+    """Extract a numeric reading from a gauge photo using a local Ollama vision model.
 
-    TODO: Replace this stub with the real implementation. Two paths:
-      Path A (immediate): call OpenAI Vision or Google Cloud Vision API.
-      Path B (preferred): import the gauge_identifier model from the other project
-                          and run inference server-side in api/ocr/.
+    Requires GAUGE_OLLAMA_MODEL env var (e.g. llava:7b) and Ollama running locally.
+    Falls back to a stub result if not configured.
     """
-    return {
-        'value': None,
-        'unit': '',
-        'is_alert': False,
-        'alert_reason': '',
-        'raw_ocr_text': 'OCR not yet integrated — implement _run_ocr() in api/routes/gauges.py',
-    }
+    if not _OLLAMA_MODEL:
+        return {
+            'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+            'raw_ocr_text': 'OCR not configured — set GAUGE_OLLAMA_MODEL env var (e.g. llava:7b)',
+        }
+    try:
+        r = httpx.post(
+            f'{_OLLAMA_HOST}/api/generate',
+            json={
+                'model': _OLLAMA_MODEL,
+                'prompt': _OCR_PROMPT,
+                'images': [photo_b64],
+                'stream': False,
+                'format': _OCR_SCHEMA,
+                'options': {'temperature': 0},
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        result = json.loads(r.json().get('response', '{}'))
+        value = result.get('reading_value') if result.get('is_gauge') else None
+        reasoning = result.get('needle_reasoning', '')
+        confidence = result.get('confidence', '?')
+        return {
+            'value': value,
+            'unit': result.get('unit', ''),
+            'is_alert': False,
+            'alert_reason': '',
+            'raw_ocr_text': f'{confidence} confidence — {reasoning}',
+        }
+    except Exception as e:
+        return {
+            'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+            'raw_ocr_text': f'OCR error: {e.__class__.__name__}',
+        }
 
 
 def _save_photo(photo_b64: str, db_path: str) -> str:

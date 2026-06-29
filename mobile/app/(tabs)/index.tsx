@@ -5,6 +5,11 @@ import {
 import { getDashboard, DashboardData, ComponentData } from '../../services/api';
 import ComponentCard from '../../components/ComponentCard';
 
+const LEVEL_COLOR: Record<string, string> = {
+  RED: '#e74c3c', ORANGE: '#e67e22', YELLOW: '#f39c12', GREEN: '#2ecc71',
+};
+const LEVELS = ['RED', 'ORANGE', 'YELLOW', 'GREEN'] as const;
+
 export default function DashboardScreen() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,9 +82,22 @@ export default function DashboardScreen() {
         }
         ListHeaderComponent={
           data ? (
-            <Text style={styles.subtitle}>
-              Predictions as of {new Date(data.generated_at).toLocaleString()}
-            </Text>
+            <View>
+              <View style={styles.chips}>
+                {LEVELS.map(level => {
+                  const count = data.components.filter(c => c.alert_level === level).length;
+                  return (
+                    <View key={level} style={styles.chip}>
+                      <Text style={[styles.chipNumber, { color: LEVEL_COLOR[level] }]}>{count}</Text>
+                      <Text style={styles.chipLabel}>{level}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <Text style={styles.subtitle}>
+                Predictions as of {new Date(data.generated_at).toLocaleString()}
+              </Text>
+            </View>
           ) : null
         }
         ListEmptyComponent={
@@ -116,6 +134,22 @@ const styles = StyleSheet.create({
   },
   errorText: { color: '#ff6b6b', fontSize: 12, textAlign: 'center' },
   list: { padding: 16, paddingTop: 8 },
+  chips: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  chip: {
+    flex: 1,
+    backgroundColor: '#16213e',
+    borderWidth: 1,
+    borderColor: '#2a2a5a',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  chipNumber: { fontSize: 20, fontWeight: '800' },
+  chipLabel: { fontSize: 10, color: '#8aa', marginTop: 2 },
   subtitle: {
     color: '#555',
     fontSize: 11,
