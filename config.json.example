@@ -3,5 +3,8 @@
   "db_path":        "C:\\Path\\To\\cyclotron_monitor\\data\\cyclotron.db",
   "model_dir":      "C:\\Path\\To\\cyclotron_monitor\\data\\models",
   "dashboard_path": "C:\\Path\\To\\cyclotron_monitor\\data\\dashboard.json",
-  "alert_path":     "C:\\Path\\To\\Cyclotron\\ALERT.txt"
+  "alert_path":     "C:\\Path\\To\\Cyclotron\\ALERT.txt",
+
+  "lab_id":         "petlabs-pretoria",
+  "cloud_api_url":  "https://your-api-host.example.com"
 }

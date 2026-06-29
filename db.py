@@ -1,6 +1,25 @@
 import sqlite3
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS gauge_readings (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    lab_id       TEXT    NOT NULL,
+    gauge_name   TEXT    DEFAULT '',
+    timestamp    TEXT    NOT NULL,
+    value        REAL,
+    unit         TEXT    DEFAULT '',
+    is_alert     INTEGER DEFAULT 0,
+    alert_reason TEXT    DEFAULT '',
+    photo_path   TEXT    DEFAULT '',
+    raw_ocr_text TEXT    DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_gauge_lab_ts ON gauge_readings(lab_id, timestamp DESC);
+CREATE TABLE IF NOT EXISTS push_tokens (
+    token         TEXT PRIMARY KEY,
+    lab_id        TEXT NOT NULL,
+    platform      TEXT DEFAULT '',
+    registered_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS beam_daily (
     date TEXT NOT NULL,
     param TEXT NOT NULL,
