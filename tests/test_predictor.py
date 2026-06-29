@@ -83,9 +83,12 @@ def test_build_training_data_labels_correctly(tmp_path):
     result = build_training_data('ION SOURCE', db, build_features)
     if result[0] is None:
         pytest.skip("Not enough training data in synthetic DB")
+    from models.trainer import POSITIVE_WINDOW, NEGATIVE_THRESHOLD
     X, y, days_arr, feature_names, dates = result
     for d, label, days in zip(dates, y, days_arr):
         if label == 1:
-            assert days <= 7, f"Positive label {days} days before maintenance (>7)"
+            assert days <= POSITIVE_WINDOW, \
+                f"Positive label {days} days before maintenance (>{POSITIVE_WINDOW})"
         if label == 0:
-            assert days > 14, f"Negative label {days} days before maintenance (<=14)"
+            assert days > NEGATIVE_THRESHOLD, \
+                f"Negative label {days} days before maintenance (must be >{NEGATIVE_THRESHOLD})"

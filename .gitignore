@@ -1,0 +1,32 @@
+# Operational database — contains OT network topology, machine serial,
+# and production records for a licensed nuclear installation (NNR regulated).
+# Must NOT be committed to any remote repository.
+data/cyclotron.db
+
+# Generated files
+data/dashboard.json
+data/ALERT.txt
+data/serve_access.log
+data/*.db-wal
+data/*.db-shm
+
+# Config — contains absolute filesystem paths disclosing machine layout
+config.json
+
+# Trained model artifacts — pickle files are executable payloads; never commit
+data/models/*.pkl
+data/models/*.sha256
+
+# Authentication — PBKDF2 hash of dashboard password; never commit
+data/.credentials.json
+
+# TLS private key — never commit; cert.pem is safe to distribute for trust-store import
+data/tls/key.pem
+
+# pip-tools compiled lockfile — commit this to pin supply chain
+# requirements-lock.txt is intentionally NOT listed here
+
+# Python
+*.pyc
+__pycache__/
+.pytest_cache/

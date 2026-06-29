@@ -2,89 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none';">
+<meta name="referrer" content="no-referrer">
 <title>Cyclotron Health Monitor</title>
-<style>
-  body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
-  h1 { color: #e0e0e0; font-size: 1.4em; margin-bottom: 4px; }
-  .updated { color: #888; font-size: 0.85em; margin-bottom: 20px; }
-  .card { background: #16213e; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
-  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .comp-name { font-size: 1.1em; font-weight: bold; }
-  .status { font-size: 0.9em; font-weight: bold; padding: 3px 10px; border-radius: 4px; }
-  .GREEN  { background: #1d6b3e; color: #7aff7a; }
-  .YELLOW { background: #7a5a00; color: #ffe066; }
-  .ORANGE { background: #7a3500; color: #ffb347; }
-  .RED    { background: #6b1d1d; color: #ff6b6b; }
-  .bar-track { background: #0f3460; border-radius: 4px; height: 14px; overflow: hidden; margin: 8px 0; }
-  .bar-fill  { height: 100%; border-radius: 4px; transition: width 0.5s; }
-  .meta { font-size: 0.82em; color: #aaa; margin-top: 4px; }
-  .reasons { margin-top: 8px; font-size: 0.82em; color: #ccc; padding-left: 18px; }
-  .reasons li { margin: 2px 0; }
-  .error { color: #ff6b6b; padding: 20px; }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <h1>Cyclotron Health Monitor</h1>
 <div class="updated" id="updated">Loading...</div>
+<div id="stale-banner"></div>
 <div id="cards"></div>
-
-<script>
-const COLORS = { GREEN: '#2ecc71', YELLOW: '#f39c12', ORANGE: '#e67e22', RED: '#e74c3c' };
-const ICONS  = { GREEN: '&#10003;', YELLOW: '&#9888;', ORANGE: '&#9670;', RED: '&#9888;' };
-const LABELS = {
-  GREEN:  'All good — no action needed',
-  YELLOW: 'Plan maintenance soon',
-  ORANGE: 'Schedule this week',
-  RED:    'Replace now',
-};
-
-function render(data) {
-  document.getElementById('updated').textContent =
-    'Last updated: ' + new Date(data.generated_at).toLocaleString();
-
-  const cards = data.components.map(c => {
-    const pct = c.pct_life_used != null ? c.pct_life_used : 0;
-    const color = COLORS[c.alert_level] || '#888';
-    const daysText = c.days_estimate <= 0
-      ? 'Overdue by ' + Math.abs(Math.round(c.days_estimate)) + ' day(s)'
-      : '~' + Math.round(c.days_estimate) + ' day' + (Math.abs(c.days_estimate) === 1 ? '' : 's') + ' remaining';
-    const reasons = (c.top_reasons || [])
-      .map(r => '<li>' + r + '</li>').join('');
-
-    return '<div class="card">' +
-      '<div class="card-header">' +
-        '<span class="comp-name">' + c.name + '</span>' +
-        '<span class="status ' + c.alert_level + '">' +
-          ICONS[c.alert_level] + ' ' + LABELS[c.alert_level] +
-        '</span>' +
-      '</div>' +
-      '<div class="bar-track">' +
-        '<div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div>' +
-      '</div>' +
-      '<div class="meta">' +
-        'Life used: ' + pct + '% &nbsp;|&nbsp; ' + daysText +
-        ' &nbsp;|&nbsp; Last replacement: ' + c.last_maintenance +
-      '</div>' +
-      (reasons ? '<ul class="reasons">' + reasons + '</ul>' : '') +
-      '</div>';
-  }).join('');
-
-  document.getElementById('cards').innerHTML = cards;
-}
-
-function load() {
-  fetch('../data/dashboard.json?_=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(render)
-    .catch(function(e) {
-      document.getElementById('cards').innerHTML =
-        '<div class="error">Could not load dashboard.json: ' + e.message + '<br>' +
-        'Run: python main.py predict</div>';
-    });
-}
-
-load();
-setInterval(load, 60000);
-</script>
+<div id="info-popup" class="popup-overlay" style="display:none">
+  <div class="popup-box">
+    <button class="popup-close" id="popup-close" aria-label="Close">&times;</button>
+    <div class="popup-title" id="popup-title"></div>
+    <div class="popup-body" id="popup-body"></div>
+    <div class="popup-source" id="popup-source"></div>
+  </div>
+</div>
+<script src="/app.js"></script>
 </body>
 </html>

@@ -1,9 +1,14 @@
 import json
+import os
+import tempfile
 import numpy as np
 from datetime import datetime, date
 from pathlib import Path
 
-AVG_CYCLES = {'ION SOURCE': 46, 'FOILS': 78, 'BL1 Target 1': 51, 'BL2 Target 1': 56}
+# Empirical medians computed from maintenance_events history (updated 2026-06-26).
+# Used only for the pct_life_used progress bar — counter.py computes the live
+# projection dynamically and is the authoritative source for days_estimate.
+AVG_CYCLES = {'ION SOURCE': 58, 'FOILS': 77, 'BL1 Target 1': 42, 'BL2 Target 1': 85, 'TRANSFER LINES': 35}
 
 
 def write_dashboard(predictions, dashboard_path: str, alert_path: str):
@@ -12,16 +17,24 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
 
     for pred in predictions:
         avg = AVG_CYCLES.get(pred.component, 60)
-        try:
-            last = date.fromisoformat(pred.last_maintenance)
-            days_used = (date.today() - last).days
-            pct = min(100, max(0, int(100 * days_used / avg)))
-        except Exception:
+        c = pred.counter_days
+        if c is None or (isinstance(c, float) and (np.isnan(c) or np.isinf(c))):
             pct = 0
+        else:
+            # Life used = fraction of avg cycle consumed; capped at 100% when overdue
+            pct = min(100, max(0, int(100 * (avg - c) / avg)))
 
         counter_val = pred.counter_days
         if isinstance(counter_val, float) and (np.isinf(counter_val) or np.isnan(counter_val)):
             counter_val = None
+
+        trained_at = getattr(pred, 'trained_at', None)
+        model_age_days = None
+        if trained_at:
+            try:
+                model_age_days = (date.today() - date.fromisoformat(str(trained_at))).days
+            except (ValueError, TypeError):
+                pass
 
         components.append({
             'name': pred.component,
@@ -33,6 +46,9 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
             'top_reasons': pred.top_reasons,
             'counter_days': counter_val,
             'primary_signal': pred.primary_signal,
+            'warning': getattr(pred, 'warning', None),
+            'trained_at': trained_at,
+            'model_age_days': model_age_days,
         })
 
         if pred.alert_level in ('RED', 'ORANGE'):
@@ -48,10 +64,31 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
         'components': components,
     }
 
-    with open(dashboard_path, 'w') as f:
-        json.dump(dashboard, f, indent=2)
+    # Atomic write: write to a temp file, then os.replace() to avoid serving partial JSON
+    # if serve.py reads the file mid-write.
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=Path(dashboard_path).parent, suffix='.tmp', prefix='dashboard_'
+    )
+    try:
+        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+            json.dump(dashboard, f, indent=2)
+        os.replace(tmp_path, dashboard_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     alert_p = Path(alert_path)
+    # Refuse to write to a symlink — prevents an attacker-planted symlink from redirecting
+    # alert writes to an arbitrary filesystem location.
+    if alert_p.is_symlink():
+        import logging
+        logging.getLogger('cyclotron.dashboard').warning(
+            'alert_path %r is a symlink; refusing to write alert file', alert_path
+        )
+        return
     if alert_lines:
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
         alert_p.parent.mkdir(parents=True, exist_ok=True)

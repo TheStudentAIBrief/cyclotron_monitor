@@ -36,12 +36,15 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 CREATE INDEX IF NOT EXISTS idx_events_code_ts ON events(code, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_maint_label_ts ON maintenance_events(component_label, timestamp);
 """
 
 def init_db(db_path: str):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=EXTRA")  # max durability in WAL mode
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA secure_delete=ON")   # zero freed pages on delete
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()

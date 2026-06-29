@@ -1,4 +1,5 @@
 """Generate ui/patterns.html — standalone pattern discovery report."""
+import html
 import sqlite3
 import numpy as np
 import matplotlib
@@ -84,7 +85,7 @@ def _plot_pre_maintenance_drift(conn, component, params) -> str:
 
 
 def generate_patterns(db_path: str, output_path: str):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     sections = []
     for comp in COMPONENTS:
         params = COMPONENT_PARAMS.get(comp, [])
@@ -95,10 +96,11 @@ def generate_patterns(db_path: str, output_path: str):
             img_html += f'<img src="data:image/png;base64,{hist_b64}" style="max-width:600px">'
         if drift_b64:
             img_html += f'<img src="data:image/png;base64,{drift_b64}" style="max-width:100%">'
-        sections.append(f'<h2>{comp}</h2>{img_html or "<p>Insufficient data for this component.</p>"}')
+        sections.append(f'<h2>{html.escape(comp)}</h2>{img_html or "<p>Insufficient data for this component.</p>"}')
     conn.close()
 
-    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+    output_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
 <title>Cyclotron Pattern Report</title>
 <style>body{{background:#1a1a2e;color:#eee;font-family:Arial,sans-serif;padding:20px}}
 h1{{color:#e0e0e0}}h2{{color:#adb5bd;border-top:1px solid #444;padding-top:12px}}
@@ -108,5 +110,5 @@ img{{border-radius:6px;margin:6px}}</style></head><body>
 {''.join(sections)}</body></html>"""
 
     with open(output_path, 'w') as f:
-        f.write(html)
+        f.write(output_html)
     print(f"Pattern report written to {output_path}")

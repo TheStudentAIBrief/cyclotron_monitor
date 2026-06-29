@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+_MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB
+
 _WARN_CODE_RE = re.compile(r'^warning (\w+): (\w+): (.*)')
 _ERR_CODE_RE = re.compile(r'\(Err ([0-9a-fA-F]+)\)')
 _LIFETIME_RE = re.compile(r'(\w+) lifetime counter ([0-9.]+) is over (\d+)')
@@ -47,13 +49,17 @@ def _parse_rest(rest: str):
 
 def parse_hyper_file(path: str) -> pd.DataFrame:
     path = Path(path)
+    if path.is_symlink():
+        raise ValueError(f"Refusing to parse symlink: {path.name}")
+    if path.stat().st_size > _MAX_FILE_BYTES:
+        raise ValueError(f"File exceeds size limit ({path.stat().st_size} bytes): {path.name}")
     file_date = _date_from_filename(path.name)
     rows = []
 
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
             line = line.rstrip()
-            if not line:
+            if not line or len(line) > 4096:
                 continue
             mn = _NEW_TS_RE.match(line)
             mo = _OLD_TS_RE.match(line)

@@ -2,9 +2,15 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+_MAX_FILE_BYTES = 200 * 1024 * 1024  # 200 MB
+
 
 def parse_beam_file(path: str) -> pd.DataFrame:
     path = Path(path)
+    if path.is_symlink():
+        raise ValueError(f"Refusing to parse symlink: {path.name}")
+    if path.stat().st_size > _MAX_FILE_BYTES:
+        raise ValueError(f"File exceeds size limit ({path.stat().st_size} bytes): {path.name}")
     cols = None
     current_date = None
     rows = []
@@ -12,6 +18,8 @@ def parse_beam_file(path: str) -> pd.DataFrame:
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
             line = line.rstrip()
+            if len(line) > 4096:
+                continue
             if 'DATE,TIME' in line:
                 cols = [c.strip().split(' /')[0].strip() for c in line.split(',')]
                 continue

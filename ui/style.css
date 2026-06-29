@@ -1,0 +1,40 @@
+body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+h1 { color: #e0e0e0; font-size: 1.4em; margin-bottom: 4px; }
+.updated { color: #888; font-size: 0.85em; margin-bottom: 20px; }
+.card { background: #16213e; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.comp-name { font-size: 1.1em; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+.status { font-size: 0.9em; font-weight: bold; padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
+.GREEN  { background: #1d6b3e; color: #7aff7a; }
+.YELLOW { background: #7a5a00; color: #ffe066; }
+.ORANGE { background: #7a3500; color: #ffb347; }
+.RED    { background: #6b1d1d; color: #ff6b6b; }
+.signal-badge { font-size: 0.65em; font-weight: bold; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 3px; vertical-align: middle; white-space: nowrap; }
+.signal-badge.COUNTER      { background: #0a2a50; color: #6ab0ff; border: 1px solid #1a4a80; }
+.signal-badge.MODEL        { background: #0a3020; color: #60e090; border: 1px solid #1a5030; }
+.signal-badge.BOTH         { background: #25183a; color: #b090ff; border: 1px solid #3a2860; }
+.signal-badge.COUNTER_ONLY { background: #0a2a50; color: #6ab0ff; border: 1px solid #1a4a80; }
+.bar-track { background: #0f3460; border-radius: 4px; height: 14px; overflow: hidden; margin: 8px 0; }
+.bar-fill  { height: 100%; border-radius: 4px; transition: width 0.5s; }
+.meta { font-size: 0.82em; color: #aaa; margin-top: 4px; }
+.model-meta { font-size: 0.75em; color: #7a8aaa; margin-top: 4px; }
+.reasons { margin-top: 8px; font-size: 0.82em; color: #ccc; padding-left: 18px; }
+.reasons li { margin: 2px 0; }
+.accuracy-note { margin-top: 10px; padding: 8px 12px; background: #2a1a00; border-left: 3px solid #f39c12; border-radius: 0 4px 4px 0; font-size: 0.78em; color: #c8a87a; line-height: 1.5; }
+.accuracy-note strong { color: #f39c12; display: block; margin-bottom: 3px; }
+.error { color: #ff6b6b; padding: 20px; }
+#stale-banner { display: none; background: #3a1a00; border-left: 3px solid #e67e22; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 4px 4px 0; font-size: 0.85em; color: #ffb347; }
+.stale-model-badge { background: #4a2000; color: #ffb347; border-radius: 3px; padding: 1px 5px; font-size: 0.8em; font-weight: bold; vertical-align: middle; }
+.info-tip { cursor: pointer; border-bottom: 1px dotted #4a6a9a; transition: border-color 0.15s, color 0.15s; }
+.info-tip:hover { border-bottom-color: #8ab0dd; color: #ddeeff; }
+.signal-badge.info-tip { border-bottom: none; box-shadow: inset 0 -2px 0 rgba(255,255,255,0.15); }
+.signal-badge.info-tip:hover { box-shadow: inset 0 -2px 0 rgba(255,255,255,0.35); color: #fff; }
+.status.info-tip { border-bottom: none; }
+.status.info-tip:hover { opacity: 0.85; }
+.popup-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.popup-box { background: #1a2a4a; border: 1px solid #2a4a7e; border-radius: 10px; padding: 24px 28px; max-width: 500px; width: 92%; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.popup-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: #778; font-size: 1.5em; cursor: pointer; line-height: 1; padding: 0; }
+.popup-close:hover { color: #eee; }
+.popup-title { font-size: 1em; font-weight: bold; color: #b8d0ff; margin-bottom: 12px; padding-right: 20px; }
+.popup-body { font-size: 0.85em; color: #bbc; line-height: 1.65; margin-bottom: 14px; }
+.popup-source { font-size: 0.74em; color: #5a7a9a; border-top: 1px solid #1e3060; padding-top: 10px; font-style: italic; }
