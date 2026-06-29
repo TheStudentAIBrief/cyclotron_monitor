@@ -1,36 +1,10 @@
-import { useEffect } from 'react';
-import { Platform, TouchableOpacity } from 'react-native';
+import { TouchableOpacity } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
 import { logout } from '../../services/auth';
-import { registerPushToken } from '../../services/api';
-
-// Configure how notifications are displayed when the app is foregrounded
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
 
 export default function TabLayout() {
   const router = useRouter();
-
-  // Register push token once after login
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') return;
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        await registerPushToken(tokenData.data, Platform.OS as 'ios' | 'android');
-      } catch {
-        // Push registration is non-critical — don't surface errors
-      }
-    })();
-  }, []);
 
   async function handleLogout() {
     await logout();
