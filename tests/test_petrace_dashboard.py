@@ -223,3 +223,165 @@ def test_uses_only_real_batches_for_beam_and_rf():
     assert beam['alert_level'] == 'GREEN'
     rf = next(c for c in result['components'] if 'RF' in c['name'])
     assert rf['alert_level'] == 'GREEN'
+
+
+# ── pct_life_used for performance components ──────────────────────────────────
+
+def test_beam_pct_life_used_zero_at_green_floor():
+    """70 µA is the GREEN floor — 0% degradation."""
+    batches = [_batch(batch_no=i+1, peak_target_uA=70.0, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['pct_life_used'] == pytest.approx(0.0, abs=1.0)
+
+def test_beam_pct_life_used_100_at_red_threshold():
+    """30 µA is the RED threshold — 100% degradation."""
+    batches = [_batch(batch_no=i+1, peak_target_uA=30.0, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['pct_life_used'] == pytest.approx(100.0, abs=1.0)
+
+def test_beam_pct_life_used_50_at_midpoint():
+    """50 µA is halfway between 70 and 30 — 50% degradation."""
+    batches = [_batch(batch_no=i+1, peak_target_uA=50.0, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['pct_life_used'] == pytest.approx(50.0, abs=1.0)
+
+def test_beam_pct_life_used_clamped_to_zero_when_above_green_floor():
+    """84 µA (above GREEN floor) → clamped to 0%."""
+    batches = [_batch(batch_no=i+1, peak_target_uA=84.0, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['pct_life_used'] == pytest.approx(0.0, abs=1.0)
+
+def test_rf_pct_life_used_zero_at_green_floor():
+    """0.97 is the GREEN floor for RF efficiency."""
+    batches = [_batch(batch_no=i+1, rf_efficiency=0.97, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    rf = next(c for c in result['components'] if 'RF' in c['name'])
+    assert rf['pct_life_used'] == pytest.approx(0.0, abs=1.0)
+
+def test_rf_pct_life_used_100_at_red_threshold():
+    """0.90 is the RED threshold for RF efficiency."""
+    batches = [_batch(batch_no=i+1, rf_efficiency=0.90, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    rf = next(c for c in result['components'] if 'RF' in c['name'])
+    assert rf['pct_life_used'] == pytest.approx(100.0, abs=1.0)
+
+def test_vacuum_pct_life_used_zero_at_green_ceiling():
+    """3e-5 mbar is the GREEN ceiling — 0% degradation."""
+    batches = [_batch(batch_no=i+1, peak_vacuum_P=3e-5, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    assert vac['pct_life_used'] == pytest.approx(0.0, abs=1.0)
+
+def test_vacuum_pct_life_used_100_at_red_threshold():
+    """5e-4 mbar is the RED threshold — 100% degradation."""
+    batches = [_batch(batch_no=i+1, peak_vacuum_P=5e-4, row_count=100) for i in range(5)]
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    assert vac['pct_life_used'] == pytest.approx(100.0, abs=1.0)
+
+
+# ── Trend / slope signals ─────────────────────────────────────────────────────
+
+def _trend_batches(metric: str, start_val: float, step: float, n: int = 10):
+    """n batches, 1 per day, with linearly changing metric value."""
+    result = []
+    for i in range(n):
+        kw = {
+            'batch_no': i + 1,
+            'batch_date': (date(2025, 6, 10) + timedelta(days=i)).isoformat(),
+            'row_count': 100,
+        }
+        kw[metric] = start_val + step * i
+        result.append(_batch(**kw))
+    return result
+
+def test_beam_declining_trend_gives_days_estimate():
+    """Beam dropping 2 µA/day from 75 → current avg ~66 µA, est ~8 days to 50µA threshold."""
+    batches = _trend_batches('peak_target_uA', start_val=75.0, step=-2.0)
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['days_estimate'] is not None
+    assert beam['days_estimate'] > 0
+
+def test_beam_stable_trend_gives_no_days_estimate():
+    """Flat beam current → no threshold-crossing projected."""
+    batches = _trend_batches('peak_target_uA', start_val=80.0, step=0.0)
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['days_estimate'] is None
+
+def test_beam_improving_trend_gives_no_days_estimate():
+    """Rising beam current → no downward threshold-crossing projected."""
+    batches = _trend_batches('peak_target_uA', start_val=60.0, step=1.0)
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['days_estimate'] is None
+
+def test_rf_declining_trend_gives_days_estimate():
+    """RF efficiency dropping 0.002/day from 0.975 → est days to 0.97 threshold."""
+    batches = _trend_batches('rf_efficiency', start_val=0.975, step=-0.002)
+    result = compute_petrace_dashboard(batches)
+    rf = next(c for c in result['components'] if 'RF' in c['name'])
+    assert rf['days_estimate'] is not None
+    assert rf['days_estimate'] > 0
+
+def test_rf_stable_trend_gives_no_days_estimate():
+    """Flat RF efficiency → no projection."""
+    batches = _trend_batches('rf_efficiency', start_val=0.980, step=0.0)
+    result = compute_petrace_dashboard(batches)
+    rf = next(c for c in result['components'] if 'RF' in c['name'])
+    assert rf['days_estimate'] is None
+
+def test_vacuum_rising_trend_gives_days_estimate():
+    """Vacuum pressure rising 3e-6/day from 1e-5 → projects crossing 3e-5 boundary."""
+    batches = _trend_batches('peak_vacuum_P', start_val=1.0e-5, step=3.0e-6)
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    assert vac['days_estimate'] is not None
+    assert vac['days_estimate'] > 0
+
+def test_vacuum_stable_trend_gives_no_days_estimate():
+    """Flat vacuum pressure → no projection."""
+    batches = _trend_batches('peak_vacuum_P', start_val=1.5e-5, step=0.0)
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    assert vac['days_estimate'] is None
+
+def test_vacuum_improving_trend_gives_no_days_estimate():
+    """Falling vacuum pressure (better) → no upper threshold projected."""
+    batches = _trend_batches('peak_vacuum_P', start_val=4.0e-5, step=-1.0e-6)
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    assert vac['days_estimate'] is None
+
+def test_single_batch_gives_no_trend_for_beam():
+    """Only 1 batch → cannot compute slope → no days_estimate."""
+    result = compute_petrace_dashboard([_batch(peak_target_uA=60.0)])
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    assert beam['days_estimate'] is None
+
+def test_declining_beam_includes_trend_in_top_reasons():
+    """A declining trend must appear in the component's top_reasons."""
+    batches = _trend_batches('peak_target_uA', start_val=75.0, step=-2.0)
+    result = compute_petrace_dashboard(batches)
+    beam = next(c for c in result['components'] if 'Beam' in c['name'] or 'Target' in c['name'])
+    reasons_text = ' '.join(beam['top_reasons']).lower()
+    assert 'trend' in reasons_text or '/' in ' '.join(beam['top_reasons'])
+
+def test_declining_rf_includes_trend_in_top_reasons():
+    batches = _trend_batches('rf_efficiency', start_val=0.975, step=-0.002)
+    result = compute_petrace_dashboard(batches)
+    rf = next(c for c in result['components'] if 'RF' in c['name'])
+    reasons_text = ' '.join(rf['top_reasons']).lower()
+    assert 'trend' in reasons_text or '/' in ' '.join(rf['top_reasons'])
+
+def test_rising_vacuum_includes_trend_in_top_reasons():
+    batches = _trend_batches('peak_vacuum_P', start_val=1.0e-5, step=3.0e-6)
+    result = compute_petrace_dashboard(batches)
+    vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
+    reasons_text = ' '.join(vac['top_reasons']).lower()
+    assert 'trend' in reasons_text or '/' in ' '.join(vac['top_reasons'])
