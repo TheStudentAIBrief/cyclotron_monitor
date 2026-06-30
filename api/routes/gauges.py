@@ -200,8 +200,12 @@ def list_gauges(
         items = []
         for r in rows:
             d = dict(r)
-            d['status'] = _gauge_status(d.get('value'), d.get('alert_lo'), d.get('alert_hi'),
-                                        d.get('action_lo'), d.get('action_hi'))
+            status = _gauge_status(d.get('value'), d.get('alert_lo'), d.get('alert_hi'),
+                                   d.get('action_lo'), d.get('action_hi'))
+            # is_alert=1 set manually (no thresholds) must not be silently downgraded to NORMAL
+            if status == 'NORMAL' and d.get('is_alert'):
+                status = 'ALERT'
+            d['status'] = status
             items.append(d)
         return {'page': page, 'per_page': per_page, 'items': items}
     finally:
