@@ -169,6 +169,9 @@ export const getGauges = (page = 1, gauge_name?: string) => {
   return request<Paged<GaugeReading>>(`/api/gauges?${p}`);
 };
 
+export const deleteGauge = (id: number) =>
+  request<{ deleted: number }>(`/api/gauges/${id}`, { method: 'DELETE' });
+
 // ─── Records ──────────────────────────────────────────────────────────────────
 
 export const getMaintenance = (page = 1, component?: string) => {

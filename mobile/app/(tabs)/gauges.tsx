@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput, Switch,
-  ScrollView, Image, ActivityIndicator, RefreshControl,
+  ScrollView, Image, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  submitGaugePhoto, submitManualGauge, getGauges, GaugeReading,
+  submitGaugePhoto, submitManualGauge, getGauges, deleteGauge, GaugeReading,
 } from '../../services/api';
 import { gaugeStatus, STATUS_COLORS, GaugeStatus } from '../../utils/gaugeStatus';
 
@@ -23,6 +23,7 @@ export default function GaugesScreen() {
   const [history, setHistory] = useState<GaugeReading[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -106,6 +107,44 @@ export default function GaugesScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleDelete(id: number, gaugeName: string) {
+    const name = gaugeName || 'Unnamed';
+    Alert.alert(
+      'Delete Reading',
+      `Remove the reading for "${name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Confirm Deletion',
+              'This reading will be permanently deleted and cannot be recovered.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setDeletingId(id);
+                    try {
+                      await deleteGauge(id);
+                      await loadHistory();
+                    } catch (e: unknown) {
+                      setMessage({ text: e instanceof Error ? e.message : 'Delete failed', ok: false });
+                    } finally {
+                      setDeletingId(null);
+                    }
+                  },
+                },
+              ],
+            ),
+        },
+      ],
+    );
   }
 
   return (
@@ -236,8 +275,24 @@ export default function GaugesScreen() {
               <View key={item.id} style={[styles.histItem, { borderLeftColor: col.border, borderLeftWidth: 3 }]}>
                 <View style={styles.histHeader}>
                   <Text style={styles.histGauge}>{item.gauge_name || 'Unnamed'}</Text>
-                  <View style={[styles.statusPill, { backgroundColor: col.bg }]}>
-                    <Text style={[styles.statusPillText, { color: col.text }]}>{st}</Text>
+                  <View style={styles.histHeaderRight}>
+                    <View style={[styles.statusPill, { backgroundColor: col.bg }]}>
+                      <Text style={[styles.statusPillText, { color: col.text }]}>{st}</Text>
+                    </View>
+                    {deletingId === item.id
+                      ? <ActivityIndicator size="small" color="#884444" style={styles.deleteSpinner} />
+                      : (
+                        <TouchableOpacity
+                          onPress={() => handleDelete(item.id, item.gauge_name)}
+                          disabled={deletingId !== null}
+                          style={[styles.deleteBtn, deletingId !== null && { opacity: 0.35 }]}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={styles.deleteBtnText}>✕</Text>
+                        </TouchableOpacity>
+                      )
+                    }
                   </View>
                 </View>
                 {item.location ? (
@@ -357,6 +412,10 @@ const styles = StyleSheet.create({
   histGauge: { color: '#ccc', fontSize: 14, fontWeight: '600', flex: 1 },
   statusPill: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   statusPillText: { fontSize: 10, fontWeight: '700' },
+  histHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  deleteBtn: { paddingHorizontal: 4, paddingVertical: 2 },
+  deleteBtnText: { color: '#884444', fontSize: 16, fontWeight: '700', lineHeight: 18 },
+  deleteSpinner: { width: 20 },
   histLocation: { color: '#6b7a99', fontSize: 12, marginBottom: 3 },
   histValue: { color: '#e0e0e0', fontSize: 18, fontWeight: '700', marginBottom: 3 },
   histTs: { color: '#555', fontSize: 11 },

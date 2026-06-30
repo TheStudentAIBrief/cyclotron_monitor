@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from api.auth import get_current_user
@@ -272,6 +272,25 @@ async def import_gauge_csv(
     finally:
         conn.close()
     return {'inserted': inserted, 'errors': errors}
+
+
+@router.delete('/gauges/{reading_id}')
+def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)):
+    """Permanently delete a single gauge reading by ID."""
+    cfg = get_config()
+    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    conn = get_conn(cfg['db_path'])
+    try:
+        cur = conn.execute(
+            "DELETE FROM gauge_readings WHERE id=? AND lab_id=?",
+            [reading_id, lab_id],
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail='Reading not found')
+        return {'deleted': reading_id}
+    finally:
+        conn.close()
 
 
 class EurPhotosRequest(BaseModel):
