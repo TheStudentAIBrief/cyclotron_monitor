@@ -9,7 +9,7 @@ import {
 } from '../../services/api';
 import ComponentCard from '../../components/ComponentCard';
 
-type View = null | 'main' | 'petrace';
+type ActiveView = null | 'main' | 'petrace';
 
 const LEVEL_COLOR: Record<string, string> = {
   RED: '#e74c3c', ORANGE: '#e67e22', YELLOW: '#f39c12', GREEN: '#2ecc71',
@@ -238,7 +238,7 @@ const dash = StyleSheet.create({
 // ── Root screen ───────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
-  const [view, setView] = useState<View>(null);
+  const [view, setView] = useState<ActiveView>(null);
 
   if (view === 'main') {
     return (
