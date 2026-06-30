@@ -27,9 +27,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='PET Lab API', version='1.0.0', lifespan=lifespan)
 
+# Restrict CORS. Native mobile clients send no Origin header, so they are unaffected;
+# browser clients must be allow-listed via CORS_ALLOW_ORIGINS (comma-separated). Defaults
+# to local dev origins only — never the '*' wildcard.
+_cors = os.environ.get('CORS_ALLOW_ORIGINS', '').strip()
+_allowed_origins = (
+    [o.strip() for o in _cors.split(',') if o.strip()]
+    if _cors else ['http://localhost:8081', 'http://localhost:19006']
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origins=_allowed_origins,
     allow_methods=['GET', 'POST'],
     allow_headers=['Authorization', 'Content-Type'],
 )

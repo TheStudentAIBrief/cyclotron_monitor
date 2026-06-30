@@ -39,3 +39,11 @@ def test_eur_photos_rejects_oversized_batch():
         payload = {'photos_b64': ['eHg='] * (_MAX_EUR_PHOTOS + 1), 'filenames': []}
         r = client.post('/api/gauges/eur-photos', json=payload)
     assert r.status_code == 413
+
+
+def test_cors_is_not_wildcard():
+    with TestClient(main.app) as client:
+        r = client.get('/health', headers={'Origin': 'http://evil.example'})
+    acao = r.headers.get('access-control-allow-origin')
+    assert acao != '*'
+    assert acao != 'http://evil.example'
