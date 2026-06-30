@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +9,7 @@ from api.config import get_config
 from api.db_cloud import get_conn
 
 router = APIRouter()
+_log = logging.getLogger('cyclotron.dashboard')
 
 
 @router.get('/dashboard')
@@ -35,8 +37,9 @@ def get_dashboard(user: dict = Depends(get_current_user)):
         if p.exists():
             try:
                 return json.loads(p.read_text(encoding='utf-8'))
-            except (json.JSONDecodeError, OSError) as e:
-                raise HTTPException(500, detail=f'Dashboard read error: {e}')
+            except (json.JSONDecodeError, OSError):
+                _log.warning('Dashboard read failed', exc_info=True)
+                raise HTTPException(500, detail='Dashboard data temporarily unavailable')
 
     raise HTTPException(
         503,

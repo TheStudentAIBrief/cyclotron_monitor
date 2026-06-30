@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS petrace_batches (
     ingested_at    TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_petrace_date ON petrace_batches(batch_date DESC);
+
+-- Append-only audit log (NNR). Records deletions/mutations of regulated records:
+-- who did what, when, and the prior content — so a record can't vanish without a trace.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts     TEXT NOT NULL,
+    action TEXT NOT NULL,
+    lab_id TEXT,
+    actor  TEXT,
+    detail TEXT
+);
 """
 
 
@@ -75,6 +86,8 @@ _MIGRATIONS = [
 
 def init_cloud_tables(db_path: str) -> None:
     conn = sqlite3.connect(db_path, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")     # readers don't block on writers
+    conn.execute("PRAGMA secure_delete=ON")     # zero freed pages on delete
     conn.executescript(_SCHEMA)
     for sql in _MIGRATIONS:
         try:

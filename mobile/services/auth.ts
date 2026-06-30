@@ -19,10 +19,10 @@ async function timeoutFetch(url: string, options: RequestInit = {}): Promise<Res
     if (e instanceof Error && e.name === 'AbortError') {
       throw new Error(
         `Server did not respond within ${Math.round(Config.API_TIMEOUT_MS / 1000)}s. ` +
-        `Check that the API is running and reachable at ${Config.API_URL}.`,
+        `Check that the monitoring server is running and your network connection.`,
       );
     }
-    throw new Error(`Cannot reach server at ${Config.API_URL}. Check your network connection.`);
+    throw new Error('Cannot reach the monitoring server. Check your network connection.');
   } finally {
     clearTimeout(timer);
   }

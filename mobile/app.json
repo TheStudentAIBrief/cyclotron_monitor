@@ -27,7 +27,8 @@
         "backgroundColor": "#1a1a2e"
       },
       "package": "com.petlabs.monitor",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": ["android.permission.CAMERA"],
+      "allowBackup": false
     },
     "plugins": [
       "expo-router",

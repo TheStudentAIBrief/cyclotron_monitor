@@ -21,6 +21,10 @@ MANIFEST_NAME = 'manifest.json'
 _counter_lock = threading.Lock()
 _counter = 0
 
+# Serializes the manifest read-modify-write so concurrent imports cannot lose entries.
+# The manifest is the NNR audit index — a dropped entry is a compliance gap.
+_manifest_lock = threading.Lock()
+
 
 def _next_counter() -> int:
     global _counter
@@ -88,19 +92,20 @@ def archive_import(
         json.dumps(parsed_readings, indent=2).encode(),
     )
 
-    # Append to manifest
+    # Append to manifest under a lock so concurrent imports can't clobber each other.
     manifest_path = os.path.join(archive_dir, MANIFEST_NAME)
-    try:
-        existing = json.loads(open(manifest_path, encoding='utf-8').read())
-    except (FileNotFoundError, json.JSONDecodeError):
-        existing = []
+    with _manifest_lock:
+        try:
+            existing = json.loads(open(manifest_path, encoding='utf-8').read())
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing = []
 
-    existing.append({
-        'archived_at':    ts,
-        'source_file':    source_file,
-        'entry_dir':      entry_name,
-        'readings_count': len(parsed_readings),
-    })
-    _write_atomic(manifest_path, json.dumps(existing, indent=2).encode())
+        existing.append({
+            'archived_at':    ts,
+            'source_file':    source_file,
+            'entry_dir':      entry_name,
+            'readings_count': len(parsed_readings),
+        })
+        _write_atomic(manifest_path, json.dumps(existing, indent=2).encode())
 
     return entry_dir

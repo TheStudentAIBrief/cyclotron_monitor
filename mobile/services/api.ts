@@ -92,10 +92,10 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeout = Con
     if (e instanceof Error && e.name === 'AbortError') {
       throw new Error(
         `Server did not respond within ${Math.round(timeout / 1000)}s. ` +
-        `Check that the API is running and reachable at ${Config.API_URL}.`,
+        `Check that the monitoring server is running and your network connection.`,
       );
     }
-    throw new Error(`Cannot reach server at ${Config.API_URL}. Check your network connection.`);
+    throw new Error('Cannot reach the monitoring server. Check your network connection.');
   } finally {
     clearTimeout(timer);
   }
@@ -105,8 +105,10 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeout = Con
 
 async function request<T>(path: string, options: RequestInit = {}, timeout = Config.API_TIMEOUT_MS): Promise<T> {
   const token = await getAccessToken();
+  // FormData must set its own multipart Content-Type (with boundary) — don't force JSON.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as Record<string, string> ?? {}),
   };
@@ -195,7 +197,6 @@ export const getEvents = (page = 1, code?: string) => {
 export const importGaugeCSV = (csvText: string) =>
   request<{ inserted: number; errors: string[] }>('/api/gauges/import-csv', {
     method: 'POST',
-    headers: { 'Content-Type': 'multipart/form-data' },
     body: (() => {
       const fd = new FormData();
       fd.append('file', new Blob([csvText], { type: 'text/csv' }), 'gauge_readings.csv');

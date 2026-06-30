@@ -2,7 +2,9 @@ import base64
 import csv
 import io
 import json
+import math
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,6 +22,12 @@ router = APIRouter()
 
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 _OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', 'qwen2.5vl:7b').strip()
+
+# Bounds so a single authenticated request can't exhaust CPU/memory/disk. Each EUR
+# photo triggers a multi-second vision-model call, so cap the batch; cap the CSV so it
+# cannot be read unbounded into memory.
+_MAX_EUR_PHOTOS = int(os.environ.get('MAX_EUR_PHOTOS', '20'))
+_MAX_CSV_BYTES = int(os.environ.get('MAX_CSV_BYTES', str(10 * 1024 * 1024)))
 
 _OCR_SCHEMA = {
     "type": "object",
@@ -117,7 +125,7 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
     photos_dir = os.path.join(os.path.dirname(db_path), 'gauge_photos')
     os.makedirs(photos_dir, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    filename = f'{ts}.jpg'
+    filename = f'{ts}_{uuid.uuid4().hex[:8]}.jpg'   # uuid suffix avoids same-second collisions
     try:
         with open(os.path.join(photos_dir, filename), 'wb') as f:
             f.write(base64.b64decode(photo_b64))
@@ -152,6 +160,9 @@ def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_us
 @router.post('/gauges')
 def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_current_user)):
     """Submit a gauge reading entered manually (no photo required)."""
+    # Reject inf/nan with a clean error — stored, they would corrupt the gauge-listing JSON.
+    if not math.isfinite(req.value):
+        raise HTTPException(status_code=422, detail='value must be a finite number')
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -220,15 +231,18 @@ async def import_gauge_csv(
     """
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
-    content = await file.read()
+    content = await file.read(_MAX_CSV_BYTES + 1)
+    if len(content) > _MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail=f'CSV exceeds the {_MAX_CSV_BYTES}-byte limit.')
     text = content.decode('utf-8-sig')  # handle BOM from Excel exports
     reader = csv.DictReader(io.StringIO(text))
 
     def _float(val):
         try:
-            return float(val) if val not in (None, '', 'None', 'nan') else None
+            f = float(val) if val not in (None, '', 'None', 'nan') else None
         except (ValueError, TypeError):
             return None
+        return f if (f is None or math.isfinite(f)) else None   # drop inf/nan
 
     inserted, errors = 0, []
     conn = get_conn(cfg['db_path'])
@@ -271,18 +285,27 @@ async def import_gauge_csv(
 
 @router.delete('/gauges/{reading_id}')
 def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)):
-    """Permanently delete a single gauge reading by ID."""
+    """Permanently delete a single gauge reading by ID.
+
+    NNR audit: the deletion (actor + prior content) is recorded in audit_log *before*
+    the row is removed, so a regulated record can never disappear without a trace.
+    """
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     conn = get_conn(cfg['db_path'])
     try:
-        cur = conn.execute(
-            "DELETE FROM gauge_readings WHERE id=? AND lab_id=?",
-            [reading_id, lab_id],
-        )
-        conn.commit()
-        if cur.rowcount == 0:
+        row = conn.execute(
+            "SELECT * FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id]
+        ).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail='Reading not found')
+        ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        conn.execute(
+            "INSERT INTO audit_log (ts, action, lab_id, actor, detail) VALUES (?,?,?,?,?)",
+            [ts, 'delete_gauge_reading', lab_id, user.get('username', ''), json.dumps(dict(row))],
+        )
+        conn.execute("DELETE FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id])
+        conn.commit()
         return {'deleted': reading_id}
     finally:
         conn.close()
@@ -299,6 +322,11 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
 
     Returns total readings inserted and any per-photo errors.
     """
+    if len(req.photos_b64) > _MAX_EUR_PHOTOS:
+        raise HTTPException(
+            status_code=413,
+            detail=f'Too many photos in one request (max {_MAX_EUR_PHOTOS}).',
+        )
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     archive_dir = os.path.join(os.path.dirname(cfg['db_path']), 'gauge_archive')
