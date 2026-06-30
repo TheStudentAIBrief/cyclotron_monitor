@@ -152,7 +152,7 @@ export const submitGaugePhoto = (photo_b64: string, gauge_name: string) =>
   request('/api/gauges/reading', {
     method: 'POST',
     body: JSON.stringify({ photo_b64, gauge_name }),
-  });
+  }, Config.API_OCR_TIMEOUT_MS);
 
 export const submitManualGauge = (data: {
   gauge_name: string;

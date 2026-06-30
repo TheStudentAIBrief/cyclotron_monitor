@@ -14,6 +14,7 @@ const SAVED = {
   url: process.env.EXPO_PUBLIC_API_URL,
   timeout: process.env.EXPO_PUBLIC_API_TIMEOUT_MS,
   askTimeout: process.env.EXPO_PUBLIC_API_ASK_TIMEOUT_MS,
+  ocrTimeout: process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS,
 };
 
 afterEach(() => {
@@ -23,6 +24,8 @@ afterEach(() => {
   else process.env.EXPO_PUBLIC_API_TIMEOUT_MS = SAVED.timeout;
   if (SAVED.askTimeout === undefined) delete process.env.EXPO_PUBLIC_API_ASK_TIMEOUT_MS;
   else process.env.EXPO_PUBLIC_API_ASK_TIMEOUT_MS = SAVED.askTimeout;
+  if (SAVED.ocrTimeout === undefined) delete process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS;
+  else process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS = SAVED.ocrTimeout;
   jest.resetModules();
 });
 
@@ -84,4 +87,18 @@ test('API_ASK_TIMEOUT_MS: is strictly greater than API_TIMEOUT_MS — Ask AI mus
   jest.resetModules();
   const cfg = loadConfig();
   expect(cfg.API_ASK_TIMEOUT_MS).toBeGreaterThan(cfg.API_TIMEOUT_MS);
+});
+
+// ── API_OCR_TIMEOUT_MS ───────────────────────────────────────────────────────
+
+test('API_OCR_TIMEOUT_MS: defaults to 120000 — qwen2.5vl:7b vision OCR needs ≥2 min on CPU', () => {
+  delete process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS;
+  jest.resetModules();
+  expect(loadConfig().API_OCR_TIMEOUT_MS).toBe(120000);
+});
+
+test('API_OCR_TIMEOUT_MS: is at least 120000 — 30s causes OCR timeout before Ollama vision model responds', () => {
+  delete process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS;
+  jest.resetModules();
+  expect(loadConfig().API_OCR_TIMEOUT_MS).toBeGreaterThanOrEqual(120000);
 });
