@@ -86,10 +86,13 @@ def main():
         print(f"Not found: {source}")
         sys.exit(1)
 
-    # Login — read credentials from env or fall back to defaults for local dev
+    # Login — credentials must come from the environment (no default credentials).
     import os
-    username = os.environ.get("PETLAB_USER", "cyclotron")
-    password = os.environ.get("PETLAB_PASS", "petlabmonitor")
+    username = os.environ.get("PETLAB_USER")
+    password = os.environ.get("PETLAB_PASS")
+    if not username or not password:
+        print("Set PETLAB_USER and PETLAB_PASS environment variables before importing.")
+        sys.exit(1)
     r = requests.post(f"{args.api}/auth/login",
                       data={"username": username, "password": password})
     r.raise_for_status()

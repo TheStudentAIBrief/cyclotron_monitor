@@ -16,8 +16,11 @@ API = "http://192.168.4.46:8000"
 
 def main():
     import os
-    username = os.environ.get("PETLAB_USER", "cyclotron")
-    password = os.environ.get("PETLAB_PASS", "petlabmonitor")
+    username = os.environ.get("PETLAB_USER")
+    password = os.environ.get("PETLAB_PASS")
+    if not username or not password:
+        print("Set PETLAB_USER and PETLAB_PASS environment variables (no default credentials).")
+        sys.exit(1)
 
     csv_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "gauge_readings.csv")
     if not csv_path.exists():
