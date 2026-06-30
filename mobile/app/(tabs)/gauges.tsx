@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput, Switch,
-  ScrollView, Image, ActivityIndicator,
+  ScrollView, Image, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -21,15 +21,26 @@ export default function GaugesScreen() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [history, setHistory] = useState<GaugeReading[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     try {
       const res = await getGauges(1);
       setHistory(res.items);
-    } catch { /* history is non-critical */ }
+      setLoadError(null);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : 'Failed to load readings');
+    }
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadHistory();
+    setRefreshing(false);
+  }, [loadHistory]);
 
   async function capturePhoto() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -98,7 +109,11 @@ export default function GaugesScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.container}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4a9eff" />}
+    >
       <View style={styles.section}>
 
         {/* Camera capture */}
@@ -209,7 +224,9 @@ export default function GaugesScreen() {
       <View style={styles.history}>
         <Text style={styles.historyTitle}>Recent Readings</Text>
         {history.length === 0
-          ? <Text style={styles.empty}>No readings yet.</Text>
+          ? <Text style={loadError ? styles.loadErr : styles.empty}>
+              {loadError ?? 'No readings yet.'}
+            </Text>
           : history.map(item => {
             const st: GaugeStatus = (item.status as GaugeStatus) ||
               gaugeStatus(item.value, item.alert_lo ?? null, item.alert_hi ?? null,
@@ -345,4 +362,5 @@ const styles = StyleSheet.create({
   histTs: { color: '#555', fontSize: 11 },
   histReason: { color: '#ffb347', fontSize: 12, marginTop: 4 },
   empty: { color: '#555', textAlign: 'center', marginTop: 20 },
+  loadErr: { color: '#ff6b6b', textAlign: 'center', marginTop: 20, fontSize: 12, paddingHorizontal: 8 },
 });
