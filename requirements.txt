@@ -5,5 +5,5 @@ matplotlib==3.11.0
 numpy==2.4.6
 fastapi==0.115.14
 uvicorn[standard]==0.34.3
-PyJWT==2.10.1
-python-multipart==0.0.20
+PyJWT==2.13.0
+python-multipart==0.0.31
