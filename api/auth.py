@@ -2,7 +2,9 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,7 +14,17 @@ from fastapi.security import OAuth2PasswordBearer
 
 from api.config import get_config
 
-_SECRET = os.environ.get('API_SECRET_KEY', 'dev-secret-change-in-production')
+# Never ship a hardcoded signing key. Production sets API_SECRET_KEY (Render does this
+# via generateValue). If it is absent, fail *closed* to safety: generate a strong
+# ephemeral per-process key so the server still runs for dev/CI, but it never trusts a
+# publicly-known default — so forged tokens are impossible regardless of configuration.
+_SECRET = os.environ.get('API_SECRET_KEY')
+if not _SECRET:
+    logging.getLogger('uvicorn.error').warning(
+        'API_SECRET_KEY is not set — using an ephemeral per-process signing key. '
+        'Tokens will not survive a restart; set API_SECRET_KEY in production.'
+    )
+    _SECRET = secrets.token_hex(32)
 _ALGORITHM = 'HS256'
 _ACCESS_EXPIRE = timedelta(hours=1)
 _REFRESH_EXPIRE = timedelta(days=30)
