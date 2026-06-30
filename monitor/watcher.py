@@ -131,9 +131,11 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
             _log.info('Dashboard updated (%d components)', len(preds))
             sync_if_configured(dashboard_path)
 
-            # Prune old events after each successful refresh.
-            # Uses table-swap so it's fast even when the table has millions of rows.
-            pruned = prune_events(db_path)
+            # Archive then prune old events after each successful refresh.
+            # archive_dir sits next to the DB; individual monthly .csv.gz files
+            # are written before any rows are deleted (NNR audit trail requirement).
+            archive_dir = str(Path(db_path).parent / 'events_archive')
+            pruned = prune_events(db_path, archive_dir=archive_dir)
             if pruned:
                 _log.info('Pruned %s old events from DB', f'{pruned:,}')
         finally:

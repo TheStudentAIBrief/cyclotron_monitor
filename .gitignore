@@ -23,6 +23,10 @@ data/.credentials.json
 # TLS private key — never commit; cert.pem is safe to distribute for trust-store import
 data/tls/key.pem
 
+# NNR audit trail — monthly gzip CSV archives of historical fault events.
+# Contains the same regulated data as cyclotron.db; never commit.
+data/events_archive/
+
 # pip-tools compiled lockfile — commit this to pin supply chain
 # requirements-lock.txt is intentionally NOT listed here
 
