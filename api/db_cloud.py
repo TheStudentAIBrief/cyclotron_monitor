@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS petrace_batches (
     ingested_at    TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_petrace_date ON petrace_batches(batch_date DESC);
+
+-- Append-only audit log (NNR). Records deletions/mutations of regulated records:
+-- who did what, when, and the prior content — so a record can't vanish without a trace.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts     TEXT NOT NULL,
+    action TEXT NOT NULL,
+    lab_id TEXT,
+    actor  TEXT,
+    detail TEXT
+);
 """
 
 

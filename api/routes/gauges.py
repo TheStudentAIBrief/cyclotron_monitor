@@ -284,18 +284,27 @@ async def import_gauge_csv(
 
 @router.delete('/gauges/{reading_id}')
 def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)):
-    """Permanently delete a single gauge reading by ID."""
+    """Permanently delete a single gauge reading by ID.
+
+    NNR audit: the deletion (actor + prior content) is recorded in audit_log *before*
+    the row is removed, so a regulated record can never disappear without a trace.
+    """
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     conn = get_conn(cfg['db_path'])
     try:
-        cur = conn.execute(
-            "DELETE FROM gauge_readings WHERE id=? AND lab_id=?",
-            [reading_id, lab_id],
-        )
-        conn.commit()
-        if cur.rowcount == 0:
+        row = conn.execute(
+            "SELECT * FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id]
+        ).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail='Reading not found')
+        ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        conn.execute(
+            "INSERT INTO audit_log (ts, action, lab_id, actor, detail) VALUES (?,?,?,?,?)",
+            [ts, 'delete_gauge_reading', lab_id, user.get('username', ''), json.dumps(dict(row))],
+        )
+        conn.execute("DELETE FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id])
+        conn.commit()
         return {'deleted': reading_id}
     finally:
         conn.close()
