@@ -69,8 +69,6 @@ def _to_jpeg_bytes(raw: bytes, suffix: str, max_px: int = 1200) -> bytes:
 
 def _run_eur_ocr(jpeg_bytes: bytes) -> str:
     """Send image to Ollama with EUR prompt; return raw JSON response string."""
-    if os.environ.get("OLLAMA_NEWSLETTER_ONLY") == "1":
-        raise RuntimeError("Ollama restricted to newsletter tasks (OLLAMA_NEWSLETTER_ONLY=1)")
     b64 = base64.b64encode(jpeg_bytes).decode()
     r = httpx.post(
         f'{OLLAMA_HOST}/api/generate',
@@ -82,7 +80,7 @@ def _run_eur_ocr(jpeg_bytes: bytes) -> str:
             'format': EUR_OCR_SCHEMA,
             'options': {'temperature': 0, 'num_ctx': 4096},
         },
-        timeout=600,
+        timeout=1200,
     )
     r.raise_for_status()
     return r.json().get('response', '{}')

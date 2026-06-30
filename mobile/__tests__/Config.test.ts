@@ -72,10 +72,10 @@ test('API_TIMEOUT_MS: can be overridden via env var', () => {
 
 // ── API_ASK_TIMEOUT_MS ───────────────────────────────────────────────────────
 
-test('API_ASK_TIMEOUT_MS: defaults to 300000 (5 min — mistral:7b on CPU)', () => {
+test('API_ASK_TIMEOUT_MS: defaults to 600000 (10 min — mistral:7b on CPU)', () => {
   delete process.env.EXPO_PUBLIC_API_ASK_TIMEOUT_MS;
   jest.resetModules();
-  expect(loadConfig().API_ASK_TIMEOUT_MS).toBe(300000);
+  expect(loadConfig().API_ASK_TIMEOUT_MS).toBe(600000);
 });
 
 test('API_ASK_TIMEOUT_MS: is strictly greater than API_TIMEOUT_MS — Ask AI must not share the short timeout', () => {

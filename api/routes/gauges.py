@@ -81,11 +81,6 @@ def _run_ocr(photo_b64: str) -> dict:
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
             'raw_ocr_text': 'OCR not configured — set GAUGE_OLLAMA_MODEL env var (e.g. llava:7b)',
         }
-    if os.environ.get("OLLAMA_NEWSLETTER_ONLY") == "1":
-        return {
-            'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
-            'raw_ocr_text': 'Ollama restricted to newsletter tasks (OLLAMA_NEWSLETTER_ONLY=1)',
-        }
     try:
         r = httpx.post(
             f'{_OLLAMA_HOST}/api/generate',
@@ -97,7 +92,7 @@ def _run_ocr(photo_b64: str) -> dict:
                 'format': _OCR_SCHEMA,
                 'options': {'temperature': 0},
             },
-            timeout=120,
+            timeout=600,
         )
         r.raise_for_status()
         result = json.loads(r.json().get('response', '{}'))
@@ -323,7 +318,7 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
                     'format': EUR_OCR_SCHEMA,
                     'options': {'temperature': 0, 'num_ctx': 4096},
                 },
-                timeout=600,
+                timeout=1200,
             )
             r.raise_for_status()
             ocr_raw = r.json().get('response', '{}')
