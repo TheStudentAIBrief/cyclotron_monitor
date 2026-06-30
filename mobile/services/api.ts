@@ -236,6 +236,9 @@ export const getPETraceSummary = () =>
 export const getPETraceBatches = (page = 1) =>
   request<Paged<PETraceBatch>>(`/api/petrace/batches?page=${page}`);
 
+export const getPETraceDashboard = () =>
+  request<DashboardData>('/api/petrace/dashboard');
+
 // ─── Ask AI ───────────────────────────────────────────────────────────────────
 
 export const askAI = (question: string) =>

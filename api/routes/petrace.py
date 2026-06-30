@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
+from monitor.petrace_dashboard import compute_petrace_dashboard
 
 router = APIRouter()
 
@@ -56,6 +57,23 @@ def petrace_summary(user: dict = Depends(get_current_user)):
             'recent_batches': [dict(r) for r in recent],
             'foil_changes': changes[-10:],
         }
+    finally:
+        conn.close()
+
+
+@router.get('/petrace/dashboard')
+def petrace_dashboard(user: dict = Depends(get_current_user)):
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    try:
+        rows = conn.execute("""
+            SELECT batch_no, batch_date, foil_no, peak_target_uA, avg_target_uA,
+                   total_muAh, rf_efficiency, peak_vacuum_P, avg_vacuum_P,
+                   avg_arc_I, row_count, tracer_num, tracer_name, duration_s
+            FROM petrace_batches
+            ORDER BY batch_no ASC
+        """).fetchall()
+        return compute_petrace_dashboard([dict(r) for r in rows])
     finally:
         conn.close()
 
