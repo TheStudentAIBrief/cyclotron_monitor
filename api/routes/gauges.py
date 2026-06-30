@@ -21,6 +21,12 @@ router = APIRouter()
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 _OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', 'qwen2.5vl:7b').strip()
 
+# Bounds so a single authenticated request can't exhaust CPU/memory/disk. Each EUR
+# photo triggers a multi-second vision-model call, so cap the batch; cap the CSV so it
+# cannot be read unbounded into memory.
+_MAX_EUR_PHOTOS = int(os.environ.get('MAX_EUR_PHOTOS', '20'))
+_MAX_CSV_BYTES = int(os.environ.get('MAX_CSV_BYTES', str(10 * 1024 * 1024)))
+
 _OCR_SCHEMA = {
     "type": "object",
     "properties": {
@@ -225,7 +231,9 @@ async def import_gauge_csv(
     """
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
-    content = await file.read()
+    content = await file.read(_MAX_CSV_BYTES + 1)
+    if len(content) > _MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail=f'CSV exceeds the {_MAX_CSV_BYTES}-byte limit.')
     text = content.decode('utf-8-sig')  # handle BOM from Excel exports
     reader = csv.DictReader(io.StringIO(text))
 
@@ -304,6 +312,11 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
 
     Returns total readings inserted and any per-photo errors.
     """
+    if len(req.photos_b64) > _MAX_EUR_PHOTOS:
+        raise HTTPException(
+            status_code=413,
+            detail=f'Too many photos in one request (max {_MAX_EUR_PHOTOS}).',
+        )
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     archive_dir = os.path.join(os.path.dirname(cfg['db_path']), 'gauge_archive')

@@ -4,10 +4,12 @@ PET Lab Cloud API — FastAPI backend for the mobile app.
 Dev:        uvicorn api.main:app --reload --port 8000
 Production: uvicorn api.main:app --host 0.0.0.0 --port 8000
 """
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
@@ -31,6 +33,23 @@ app.add_middleware(
     allow_methods=['GET', 'POST'],
     allow_headers=['Authorization', 'Content-Type'],
 )
+
+# Reject oversized request bodies early (before parsing) to bound the memory/disk DoS
+# surface on the photo, EUR-form, and CSV-import endpoints. Override via MAX_REQUEST_BYTES.
+_MAX_BODY_BYTES = int(os.environ.get('MAX_REQUEST_BYTES', str(25 * 1024 * 1024)))
+
+
+@app.middleware('http')
+async def _limit_request_body(request: Request, call_next):
+    cl = request.headers.get('content-length')
+    if cl is not None:
+        try:
+            too_big = int(cl) > _MAX_BODY_BYTES
+        except ValueError:
+            return JSONResponse({'detail': 'Invalid Content-Length'}, status_code=400)
+        if too_big:
+            return JSONResponse({'detail': 'Request body too large'}, status_code=413)
+    return await call_next(request)
 
 
 @app.get('/health')
