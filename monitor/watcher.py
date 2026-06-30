@@ -9,7 +9,7 @@ from watchdog.events import FileSystemEventHandler
 from parsers.beam_parser import parse_beam_file, aggregate_daily
 from parsers.hyper_parser import parse_hyper_file
 from parsers.maintenance_labels import extract_maintenance_events, extract_from_file
-from db import init_db, upsert_beam_daily, insert_events, upsert_maintenance_event
+from db import init_db, upsert_beam_daily, insert_events, upsert_maintenance_event, prune_events
 from monitor.cloud_sync import sync_if_configured
 
 _log = logging.getLogger('cyclotron.watcher')
@@ -130,6 +130,12 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
 
             _log.info('Dashboard updated (%d components)', len(preds))
             sync_if_configured(dashboard_path)
+
+            # Prune old events after each successful refresh.
+            # Uses table-swap so it's fast even when the table has millions of rows.
+            pruned = prune_events(db_path)
+            if pruned:
+                _log.info('Pruned %s old events from DB', f'{pruned:,}')
         finally:
             _refresh_lock.release()
 

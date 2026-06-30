@@ -1,3 +1,4 @@
+import time
 from fastapi import APIRouter, Depends, Query
 from api.auth import get_current_user
 from api.config import get_config
@@ -5,6 +6,10 @@ from api.db_cloud import get_conn
 from monitor.petrace_dashboard import compute_petrace_dashboard
 
 router = APIRouter()
+
+# In-memory cache for the PETrace dashboard (recomputed at most once per 5 minutes)
+_dashboard_cache: dict = {'data': None, 'ts': 0.0}
+_DASHBOARD_TTL = 300  # seconds
 
 
 @router.get('/petrace/summary')
@@ -63,6 +68,10 @@ def petrace_summary(user: dict = Depends(get_current_user)):
 
 @router.get('/petrace/dashboard')
 def petrace_dashboard(user: dict = Depends(get_current_user)):
+    now = time.monotonic()
+    if _dashboard_cache['data'] is not None and now - _dashboard_cache['ts'] < _DASHBOARD_TTL:
+        return _dashboard_cache['data']
+
     cfg = get_config()
     conn = get_conn(cfg['db_path'])
     try:
@@ -73,7 +82,10 @@ def petrace_dashboard(user: dict = Depends(get_current_user)):
             FROM petrace_batches
             ORDER BY batch_no ASC
         """).fetchall()
-        return compute_petrace_dashboard([dict(r) for r in rows])
+        result = compute_petrace_dashboard([dict(r) for r in rows])
+        _dashboard_cache['data'] = result
+        _dashboard_cache['ts'] = now
+        return result
     finally:
         conn.close()
 

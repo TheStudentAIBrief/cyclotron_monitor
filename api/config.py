@@ -1,12 +1,14 @@
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).parent.parent / 'config.json'
 
 
+@lru_cache(maxsize=1)
 def get_config() -> dict:
-    """Load config from config.json, then override with environment variables.
+    """Load config once and cache for the lifetime of the process.
 
     Environment variables take precedence so the same code works both locally
     (config.json) and on the cloud VPS (env vars set by Render / Docker).
