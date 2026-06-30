@@ -2,7 +2,9 @@ import base64
 import csv
 import io
 import json
+import math
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -128,7 +130,7 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
     photos_dir = os.path.join(os.path.dirname(db_path), 'gauge_photos')
     os.makedirs(photos_dir, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    filename = f'{ts}.jpg'
+    filename = f'{ts}_{uuid.uuid4().hex[:8]}.jpg'   # uuid suffix avoids same-second collisions
     try:
         with open(os.path.join(photos_dir, filename), 'wb') as f:
             f.write(base64.b64decode(photo_b64))
@@ -163,6 +165,9 @@ def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_us
 @router.post('/gauges')
 def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_current_user)):
     """Submit a gauge reading entered manually (no photo required)."""
+    # Reject inf/nan with a clean error — stored, they would corrupt the gauge-listing JSON.
+    if not math.isfinite(req.value):
+        raise HTTPException(status_code=422, detail='value must be a finite number')
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -239,9 +244,10 @@ async def import_gauge_csv(
 
     def _float(val):
         try:
-            return float(val) if val not in (None, '', 'None', 'nan') else None
+            f = float(val) if val not in (None, '', 'None', 'nan') else None
         except (ValueError, TypeError):
             return None
+        return f if (f is None or math.isfinite(f)) else None   # drop inf/nan
 
     inserted, errors = 0, []
     conn = get_conn(cfg['db_path'])

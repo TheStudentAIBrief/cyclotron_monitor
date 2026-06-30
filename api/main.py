@@ -25,7 +25,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title='PET Lab API', version='1.0.0', lifespan=lifespan)
+# docs/openapi disabled — the API is internal; an unauthenticated schema would let
+# anyone on the network enumerate every route and model.
+app = FastAPI(title='PET Lab API', version='1.0.0', lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 
 # Restrict CORS. Native mobile clients send no Origin header, so they are unaffected;
 # browser clients must be allow-listed via CORS_ALLOW_ORIGINS (comma-separated). Defaults
