@@ -1,11 +1,13 @@
 import base64
+import csv
+import io
 import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel
 
 from api.auth import get_current_user
@@ -36,6 +38,21 @@ _OCR_PROMPT = (
     "and units exactly as printed on the dial. If no gauge is present set is_gauge=false "
     "and reading_value=0."
 )
+
+
+def _gauge_status(value, alert_lo, alert_hi, action_lo, action_hi) -> str:
+    """Mirrors cofounder's gauge_tool._classify() exactly: ACTION > ALERT > NORMAL."""
+    if value is None:
+        return 'UNKNOWN'
+    if action_lo is not None and value < action_lo:
+        return 'ACTION'
+    if action_hi is not None and value > action_hi:
+        return 'ACTION'
+    if alert_lo is not None and value < alert_lo:
+        return 'ALERT'
+    if alert_hi is not None and value > alert_hi:
+        return 'ALERT'
+    return 'NORMAL'
 
 
 class PhotoRequest(BaseModel):
@@ -173,6 +190,74 @@ def list_gauges(
                 "ORDER BY timestamp DESC LIMIT ? OFFSET ?",
                 [lab_id, per_page, offset],
             ).fetchall()
-        return {'page': page, 'per_page': per_page, 'items': [dict(r) for r in rows]}
+        items = []
+        for r in rows:
+            d = dict(r)
+            d['status'] = _gauge_status(d.get('value'), d.get('alert_lo'), d.get('alert_hi'),
+                                        d.get('action_lo'), d.get('action_hi'))
+            items.append(d)
+        return {'page': page, 'per_page': per_page, 'items': items}
     finally:
         conn.close()
+
+
+@router.post('/gauges/import-csv')
+async def import_gauge_csv(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Import gauge readings from the cofounder's gauge_readings.csv format.
+
+    Expected CSV columns: gauge, location, date, value_Pa,
+    alert_lo, alert_hi, action_lo, action_hi, confidence,
+    created_by, verified_by, verified_at
+    """
+    cfg = get_config()
+    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    content = await file.read()
+    text = content.decode('utf-8-sig')  # handle BOM from Excel exports
+    reader = csv.DictReader(io.StringIO(text))
+
+    def _float(val):
+        try:
+            return float(val) if val not in (None, '', 'None', 'nan') else None
+        except (ValueError, TypeError):
+            return None
+
+    inserted, errors = 0, []
+    conn = get_conn(cfg['db_path'])
+    try:
+        for i, row in enumerate(reader):
+            try:
+                gauge    = str(row.get('gauge', '')).strip()
+                location = str(row.get('location', '')).strip()
+                date     = str(row.get('date', '')).strip()[:10]
+                value_pa = _float(row.get('value_Pa'))
+                alert_lo  = _float(row.get('alert_lo'))
+                alert_hi  = _float(row.get('alert_hi'))
+                action_lo = _float(row.get('action_lo'))
+                action_hi = _float(row.get('action_hi'))
+                confidence   = str(row.get('confidence', 'import')).strip()
+                verified_by  = str(row.get('verified_by', '')).strip()
+                verified_at  = str(row.get('verified_at', '')).strip()
+
+                status   = _gauge_status(value_pa, alert_lo, alert_hi, action_lo, action_hi)
+                is_alert = 1 if status in ('ALERT', 'ACTION') else 0
+                ts       = f'{date}T00:00:00Z' if date else datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+                conn.execute(
+                    "INSERT INTO gauge_readings "
+                    "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, "
+                    "location, alert_lo, alert_hi, action_lo, action_hi, confidence, verified_by, verified_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [lab_id, gauge, ts, value_pa, 'Pa', is_alert, status,
+                     location, alert_lo, alert_hi, action_lo, action_hi,
+                     confidence, verified_by, verified_at],
+                )
+                inserted += 1
+            except Exception as exc:
+                errors.append(f'row {i + 2}: {exc.__class__.__name__}: {exc}')
+        conn.commit()
+    finally:
+        conn.close()
+    return {'inserted': inserted, 'errors': errors}

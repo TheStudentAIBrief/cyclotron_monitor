@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   submitGaugePhoto, submitManualGauge, getGauges, GaugeReading,
 } from '../../services/api';
+import { gaugeStatus, STATUS_COLORS, GaugeStatus } from '../../utils/gaugeStatus';
 
 export default function GaugesScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -209,29 +210,37 @@ export default function GaugesScreen() {
         <Text style={styles.historyTitle}>Recent Readings</Text>
         {history.length === 0
           ? <Text style={styles.empty}>No readings yet.</Text>
-          : history.map(item => (
-            <View key={item.id} style={styles.histItem}>
-              <View style={styles.histHeader}>
-                <Text style={styles.histGauge}>{item.gauge_name || 'Unnamed'}</Text>
-                {item.is_alert ? (
-                  <View style={styles.alertPill}>
-                    <Text style={styles.alertPillText}>ALERT</Text>
+          : history.map(item => {
+            const st: GaugeStatus = (item.status as GaugeStatus) ||
+              gaugeStatus(item.value, item.alert_lo ?? null, item.alert_hi ?? null,
+                          item.action_lo ?? null, item.action_hi ?? null);
+            const col = STATUS_COLORS[st];
+            return (
+              <View key={item.id} style={[styles.histItem, { borderLeftColor: col.border, borderLeftWidth: 3 }]}>
+                <View style={styles.histHeader}>
+                  <Text style={styles.histGauge}>{item.gauge_name || 'Unnamed'}</Text>
+                  <View style={[styles.statusPill, { backgroundColor: col.bg }]}>
+                    <Text style={[styles.statusPillText, { color: col.text }]}>{st}</Text>
                   </View>
+                </View>
+                {item.location ? (
+                  <Text style={styles.histLocation}>{item.location}</Text>
+                ) : null}
+                <Text style={styles.histValue}>
+                  {item.value != null
+                    ? `${item.value}${item.unit ? ' ' + item.unit : ''}`
+                    : 'No reading extracted'}
+                </Text>
+                <Text style={styles.histTs}>
+                  {item.timestamp.slice(0, 10)} {item.timestamp.slice(11, 16)} UTC
+                  {item.verified_by ? ` · verified by ${item.verified_by}` : ''}
+                </Text>
+                {item.alert_reason && item.alert_reason !== 'NORMAL' ? (
+                  <Text style={styles.histReason}>{item.alert_reason}</Text>
                 ) : null}
               </View>
-              <Text style={styles.histValue}>
-                {item.value != null
-                  ? `${item.value}${item.unit ? ' ' + item.unit : ''}`
-                  : 'No reading extracted'}
-              </Text>
-              <Text style={styles.histTs}>
-                {item.timestamp.slice(0, 19).replace('T', ' ')} UTC
-              </Text>
-              {item.alert_reason ? (
-                <Text style={styles.histReason}>{item.alert_reason}</Text>
-              ) : null}
-            </View>
-          ))
+            );
+          })
         }
       </View>
     </ScrollView>
@@ -329,8 +338,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   histGauge: { color: '#ccc', fontSize: 14, fontWeight: '600', flex: 1 },
-  alertPill: { backgroundColor: '#6b1d1d', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  alertPillText: { color: '#ff6b6b', fontSize: 10, fontWeight: '700' },
+  statusPill: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  statusPillText: { fontSize: 10, fontWeight: '700' },
+  histLocation: { color: '#6b7a99', fontSize: 12, marginBottom: 3 },
   histValue: { color: '#e0e0e0', fontSize: 18, fontWeight: '700', marginBottom: 3 },
   histTs: { color: '#555', fontSize: 11 },
   histReason: { color: '#ffb347', fontSize: 12, marginTop: 4 },

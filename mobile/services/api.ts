@@ -34,6 +34,16 @@ export interface GaugeReading {
   alert_reason: string;
   photo_path: string;
   raw_ocr_text: string;
+  // cofounder fields (present on imported readings)
+  location: string;
+  alert_lo: number | null;
+  alert_hi: number | null;
+  action_lo: number | null;
+  action_hi: number | null;
+  confidence: string;
+  verified_by: string;
+  verified_at: string;
+  status: 'NORMAL' | 'ALERT' | 'ACTION' | 'UNKNOWN';
 }
 
 export interface MaintenanceEvent {
@@ -178,6 +188,17 @@ export const getEvents = (page = 1, code?: string) => {
   if (code) p.set('code', code);
   return request<Paged<FaultEvent>>(`/api/records/events?${p}`);
 };
+
+export const importGaugeCSV = (csvText: string) =>
+  request<{ inserted: number; errors: string[] }>('/api/gauges/import-csv', {
+    method: 'POST',
+    headers: { 'Content-Type': 'multipart/form-data' },
+    body: (() => {
+      const fd = new FormData();
+      fd.append('file', new Blob([csvText], { type: 'text/csv' }), 'gauge_readings.csv');
+      return fd;
+    })(),
+  });
 
 // ─── Ask AI ───────────────────────────────────────────────────────────────────
 

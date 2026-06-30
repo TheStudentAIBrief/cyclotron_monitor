@@ -11,7 +11,15 @@ CREATE TABLE IF NOT EXISTS gauge_readings (
     is_alert     INTEGER DEFAULT 0,
     alert_reason TEXT    DEFAULT '',
     photo_path   TEXT    DEFAULT '',
-    raw_ocr_text TEXT    DEFAULT ''
+    raw_ocr_text TEXT    DEFAULT '',
+    location     TEXT    DEFAULT '',
+    alert_lo     REAL,
+    alert_hi     REAL,
+    action_lo    REAL,
+    action_hi    REAL,
+    confidence   TEXT    DEFAULT '',
+    verified_by  TEXT    DEFAULT '',
+    verified_at  TEXT    DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_gauge_lab_ts ON gauge_readings(lab_id, timestamp DESC);
 
@@ -32,9 +40,26 @@ CREATE TABLE IF NOT EXISTS synced_dashboard (
 """
 
 
+_MIGRATIONS = [
+    "ALTER TABLE gauge_readings ADD COLUMN location TEXT DEFAULT ''",
+    "ALTER TABLE gauge_readings ADD COLUMN alert_lo REAL",
+    "ALTER TABLE gauge_readings ADD COLUMN alert_hi REAL",
+    "ALTER TABLE gauge_readings ADD COLUMN action_lo REAL",
+    "ALTER TABLE gauge_readings ADD COLUMN action_hi REAL",
+    "ALTER TABLE gauge_readings ADD COLUMN confidence TEXT DEFAULT ''",
+    "ALTER TABLE gauge_readings ADD COLUMN verified_by TEXT DEFAULT ''",
+    "ALTER TABLE gauge_readings ADD COLUMN verified_at TEXT DEFAULT ''",
+]
+
+
 def init_cloud_tables(db_path: str) -> None:
     conn = sqlite3.connect(db_path, timeout=30)
     conn.executescript(_SCHEMA)
+    for sql in _MIGRATIONS:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
     conn.close()
 
