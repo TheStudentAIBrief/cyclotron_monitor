@@ -20,6 +20,7 @@ def petrace_summary(user: dict = Depends(get_current_user)):
         agg = conn.execute("""
             SELECT
                 COUNT(*)          AS batch_count,
+                MAX(batch_no)     AS last_batch_no,
                 MIN(batch_date)   AS first_date,
                 MAX(batch_date)   AS last_date,
                 SUM(total_muAh)   AS total_muAh,
@@ -55,6 +56,7 @@ def petrace_summary(user: dict = Depends(get_current_user)):
 
         return {
             'batch_count': agg['batch_count'] or 0,
+            'last_batch_no': agg['last_batch_no'],
             'first_date': agg['first_date'],
             'last_date': agg['last_date'],
             'total_muAh': round(agg['total_muAh'] or 0, 2),

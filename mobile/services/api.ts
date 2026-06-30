@@ -225,6 +225,7 @@ export interface PETraceBatch {
 
 export interface PETraceSummary {
   batch_count: number;
+  last_batch_no: number | null;
   first_date: string;
   last_date: string;
   total_muAh: number;

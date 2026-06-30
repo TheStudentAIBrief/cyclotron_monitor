@@ -102,6 +102,9 @@ export default function PETraceScreen() {
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Batches</Text>
           <Text style={styles.cardValue}>{summary?.batch_count ?? 0}</Text>
+          {summary?.last_batch_no != null && summary.last_batch_no !== summary.batch_count && (
+            <Text style={styles.cardSub}>last #{summary.last_batch_no}</Text>
+          )}
         </View>
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Total µAh</Text>
@@ -213,6 +216,7 @@ const styles = StyleSheet.create({
   cardLabel: { color: '#555', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
   cardValue: { color: '#e0e0e0', fontSize: 24, fontWeight: '700' },
   cardMeta: { color: '#aaa', fontSize: 13, marginTop: 4 },
+  cardSub: { color: '#888', fontSize: 10, marginTop: 2 },
 
   section: { paddingHorizontal: 12, paddingBottom: 8 },
   sectionTitle: {
