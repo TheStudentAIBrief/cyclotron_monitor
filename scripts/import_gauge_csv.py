@@ -12,11 +12,13 @@ import pathlib
 import requests
 
 API = "http://192.168.4.46:8000"
-USERNAME = "cyclotron"
-PASSWORD = "petlabmonitor"
 
 
 def main():
+    import os
+    username = os.environ.get("PETLAB_USER", "cyclotron")
+    password = os.environ.get("PETLAB_PASS", "petlabmonitor")
+
     csv_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "gauge_readings.csv")
     if not csv_path.exists():
         print(f"File not found: {csv_path}")
@@ -24,7 +26,7 @@ def main():
 
     # Login
     r = requests.post(f"{API}/auth/login",
-                      data={"username": USERNAME, "password": PASSWORD})
+                      data={"username": username, "password": password})
     r.raise_for_status()
     token = r.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
