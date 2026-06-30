@@ -37,6 +37,27 @@ CREATE TABLE IF NOT EXISTS synced_dashboard (
     payload   TEXT NOT NULL,
     synced_at TEXT NOT NULL
 );
+
+-- PETrace 800 (PET Labs Pretoria) — one row per production batch.
+CREATE TABLE IF NOT EXISTS petrace_batches (
+    batch_no       INTEGER PRIMARY KEY,
+    batch_date     TEXT    NOT NULL,
+    tracer_num     INTEGER DEFAULT 0,
+    tracer_name    TEXT    DEFAULT '',
+    site           TEXT    DEFAULT '',
+    duration_s     REAL    DEFAULT 0,
+    row_count      INTEGER DEFAULT 0,
+    foil_no        INTEGER,
+    peak_target_uA REAL    DEFAULT 0,
+    avg_target_uA  REAL    DEFAULT 0,
+    total_muAh     REAL    DEFAULT 0,
+    avg_arc_I      REAL    DEFAULT 0,
+    avg_vacuum_P   REAL    DEFAULT 0,
+    peak_vacuum_P  REAL    DEFAULT 0,
+    rf_efficiency  REAL    DEFAULT 0,
+    ingested_at    TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_petrace_date ON petrace_batches(batch_date DESC);
 """
 
 

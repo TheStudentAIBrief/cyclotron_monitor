@@ -200,6 +200,42 @@ export const importGaugeCSV = (csvText: string) =>
     })(),
   });
 
+// ─── PETrace ──────────────────────────────────────────────────────────────────
+
+export interface PETraceBatch {
+  batch_no: number;
+  batch_date: string;
+  tracer_num: number;
+  tracer_name: string;
+  site: string;
+  duration_s: number;
+  row_count: number;
+  foil_no: number | null;
+  peak_target_uA: number;
+  avg_target_uA: number;
+  total_muAh: number;
+  avg_arc_I: number;
+  avg_vacuum_P: number;
+  peak_vacuum_P: number;
+  rf_efficiency: number;
+}
+
+export interface PETraceSummary {
+  batch_count: number;
+  first_date: string;
+  last_date: string;
+  total_muAh: number;
+  current_foil: number | null;
+  recent_batches: PETraceBatch[];
+  foil_changes: Array<{ batch_no: number; batch_date: string; old_foil: number; new_foil: number }>;
+}
+
+export const getPETraceSummary = () =>
+  request<PETraceSummary>('/api/petrace/summary');
+
+export const getPETraceBatches = (page = 1) =>
+  request<Paged<PETraceBatch>>(`/api/petrace/batches?page=${page}`);
+
 // ─── Ask AI ───────────────────────────────────────────────────────────────────
 
 export const askAI = (question: string) =>
