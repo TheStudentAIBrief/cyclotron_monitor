@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
+from monitor.eur_form_parser import EUR_OCR_PROMPT, EUR_OCR_SCHEMA, parse_eur_response
+from monitor.gauge_archive import archive_import
 
 router = APIRouter()
 
@@ -78,6 +80,11 @@ def _run_ocr(photo_b64: str) -> dict:
         return {
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
             'raw_ocr_text': 'OCR not configured — set GAUGE_OLLAMA_MODEL env var (e.g. llava:7b)',
+        }
+    if os.environ.get("OLLAMA_NEWSLETTER_ONLY") == "1":
+        return {
+            'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+            'raw_ocr_text': 'Ollama restricted to newsletter tasks (OLLAMA_NEWSLETTER_ONLY=1)',
         }
     try:
         r = httpx.post(
@@ -260,4 +267,67 @@ async def import_gauge_csv(
         conn.commit()
     finally:
         conn.close()
+    return {'inserted': inserted, 'errors': errors}
+
+
+class EurPhotosRequest(BaseModel):
+    photos_b64: list[str]
+    filenames: list[str] = []
+
+
+@router.post('/gauges/eur-photos')
+def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_user)):
+    """Accept one or more EUR form photos (base64), run OCR, archive, and bulk-insert readings.
+
+    Returns total readings inserted and any per-photo errors.
+    """
+    cfg = get_config()
+    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    archive_dir = os.path.join(os.path.dirname(cfg['db_path']), 'gauge_archive')
+    inserted, errors = 0, []
+
+    for i, b64 in enumerate(req.photos_b64):
+        filename = req.filenames[i] if i < len(req.filenames) else f'upload_{i}.jpg'
+        try:
+            photo_bytes = base64.b64decode(b64)
+            r = httpx.post(
+                f'{_OLLAMA_HOST}/api/generate',
+                json={
+                    'model': _OLLAMA_MODEL,
+                    'prompt': EUR_OCR_PROMPT,
+                    'images': [b64],
+                    'stream': False,
+                    'format': EUR_OCR_SCHEMA,
+                    'options': {'temperature': 0, 'num_ctx': 4096},
+                },
+                timeout=600,
+            )
+            r.raise_for_status()
+            ocr_raw = r.json().get('response', '{}')
+            readings = parse_eur_response(ocr_raw)
+            archive_import(filename, photo_bytes, ocr_raw, readings, archive_dir)
+
+            conn = get_conn(cfg['db_path'])
+            try:
+                for row in readings:
+                    conn.execute(
+                        "INSERT INTO gauge_readings "
+                        "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, "
+                        "location, alert_lo, alert_hi, action_lo, action_hi, confidence, verified_by) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        [
+                            lab_id, row['gauge_name'], row['timestamp'], row['value'],
+                            row['unit'], row['is_alert'], row['alert_reason'],
+                            row.get('location', ''), row.get('alert_lo'), row.get('alert_hi'),
+                            row.get('action_lo'), row.get('action_hi'),
+                            row.get('confidence', 'eur_form'), row.get('verified_by', ''),
+                        ],
+                    )
+                    inserted += 1
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            errors.append({'file': filename, 'error': f'{exc.__class__.__name__}: {exc}'})
+
     return {'inserted': inserted, 'errors': errors}

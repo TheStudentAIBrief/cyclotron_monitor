@@ -27,6 +27,13 @@ data/tls/key.pem
 # Contains the same regulated data as cyclotron.db; never commit.
 data/events_archive/
 
+# EUR form audit archive — write-once per-import directories with original photos,
+# OCR responses, and parsed readings. NNR compliance data; never commit.
+data/gauge_archive/
+
+# Raw gauge photos saved by the API on upload; not versioned.
+data/gauge_photos/
+
 # pip-tools compiled lockfile — commit this to pin supply chain
 # requirements-lock.txt is intentionally NOT listed here
 

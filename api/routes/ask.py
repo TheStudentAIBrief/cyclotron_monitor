@@ -36,6 +36,8 @@ class AskRequest(BaseModel):
 
 
 def _ollama_available() -> bool:
+    if os.environ.get("OLLAMA_NEWSLETTER_ONLY") == "1":
+        return False
     try:
         httpx.get(f'{OLLAMA_HOST}/api/tags', timeout=4).raise_for_status()
         return True

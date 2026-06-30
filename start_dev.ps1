@@ -14,7 +14,7 @@ if (-not $root) { $root = (Get-Location).Path }
 
 function Get-WiFiIP {
     # Try the physical Wi-Fi adapter first
-    $wifi = Get-NetIPAddress -InterfaceAlias "Wi-Fi" -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    $wifi = Get-NetIPAddress -InterfaceAlias "WiFi" -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -notlike "169.254.*" } |
         Select-Object -First 1 -ExpandProperty IPAddress
     if ($wifi) { return $wifi }
