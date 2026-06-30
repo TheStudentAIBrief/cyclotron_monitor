@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import os
 import pickle
 import numpy as np
 from dataclasses import dataclass, field
@@ -44,8 +45,26 @@ def _verify_checksum(path: Path) -> bytes:
             "Model integrity file missing. Re-run 'python main.py train' to regenerate."
         )
     expected = sha_path.read_text().strip()
-    data = path.read_bytes()  # read once — shared between hash verification and deserialization
-    actual = hashlib.sha256(data).hexdigest()
+    data = path.read_bytes()  # read once — shared between verification and deserialization
+    # When MODEL_HMAC_KEY is set, models are signed with a keyed HMAC ('hmac-sha256:<tag>')
+    # that an attacker who can only write the model directory cannot forge. A bare-hex
+    # sidecar is a legacy *unkeyed* SHA-256 (forgeable): still accepted for backward
+    # compatibility, but rejected when MODEL_REQUIRE_SIGNED=1.
+    key = os.environ.get('MODEL_HMAC_KEY')
+    if expected.startswith('hmac-sha256:'):
+        if not key:
+            raise RuntimeError("Model is signed but MODEL_HMAC_KEY is not configured.")
+        actual = 'hmac-sha256:' + hmac.new(key.encode(), data, hashlib.sha256).hexdigest()
+    else:
+        if os.environ.get('MODEL_REQUIRE_SIGNED') == '1':
+            raise RuntimeError(
+                "Unsigned model rejected (MODEL_REQUIRE_SIGNED=1). "
+                "Re-train with MODEL_HMAC_KEY set to sign it."
+            )
+        if key:
+            _log.warning("Model %s uses a legacy unkeyed checksum; re-train with "
+                         "MODEL_HMAC_KEY to sign it.", path.name)
+        actual = hashlib.sha256(data).hexdigest()
     if not hmac.compare_digest(actual, expected):
         raise RuntimeError(
             "Model integrity check failed. File may have been tampered with. "

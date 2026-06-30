@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+import os
 import pickle
 import sqlite3
 import numpy as np
@@ -15,8 +17,15 @@ from sklearn.utils.class_weight import compute_sample_weight
 
 
 def _write_checksum(path: Path):
-    sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    Path(path).with_suffix('.sha256').write_text(sha256)
+    """Write the integrity sidecar. With MODEL_HMAC_KEY set, sign with a keyed HMAC
+    (forgery-resistant); otherwise fall back to a legacy unkeyed SHA-256 for back-compat."""
+    data = Path(path).read_bytes()
+    key = os.environ.get('MODEL_HMAC_KEY')
+    if key:
+        tag = 'hmac-sha256:' + hmac.new(key.encode(), data, hashlib.sha256).hexdigest()
+    else:
+        tag = hashlib.sha256(data).hexdigest()
+    Path(path).with_suffix('.sha256').write_text(tag)
 
 
 POSITIVE_WINDOW = 10
