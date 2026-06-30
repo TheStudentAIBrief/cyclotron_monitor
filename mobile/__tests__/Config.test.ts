@@ -52,10 +52,16 @@ test('API_URL: falls back to localhost when EXPO_PUBLIC_API_URL is unset', () =>
 
 // ── API_TIMEOUT_MS ───────────────────────────────────────────────────────────
 
-test('API_TIMEOUT_MS: defaults to 10000 (fast endpoints)', () => {
+test('API_TIMEOUT_MS: defaults to 30000 — wide enough for WiFi cold-start', () => {
   delete process.env.EXPO_PUBLIC_API_TIMEOUT_MS;
   jest.resetModules();
-  expect(loadConfig().API_TIMEOUT_MS).toBe(10000);
+  expect(loadConfig().API_TIMEOUT_MS).toBe(30000);
+});
+
+test('API_TIMEOUT_MS: default is at least 30000 — 10s causes dashboard/records timeout on WiFi', () => {
+  delete process.env.EXPO_PUBLIC_API_TIMEOUT_MS;
+  jest.resetModules();
+  expect(loadConfig().API_TIMEOUT_MS).toBeGreaterThanOrEqual(30000);
 });
 
 test('API_TIMEOUT_MS: can be overridden via env var', () => {
