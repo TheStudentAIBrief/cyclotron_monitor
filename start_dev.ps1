@@ -121,7 +121,19 @@ $qrScriptPath = Join-Path $env:TEMP "petlab_qr_gen.py"
 Set-Content -Path $qrScriptPath -Value $qrScript -Encoding utf8
 python $qrScriptPath
 
-# ── 6. Summary ───────────────────────────────────────────────────────────────
+# ── 6. Regenerate gauge QR label PDFs for the current WiFi IP ───────────────
+# The printed labels' QR codes encode $apiUrl -- if the WiFi network (and
+# therefore the IP) changed since they were last printed, they'd silently
+# point at the wrong address. Every start_dev.ps1 run re-detects the IP
+# (step 1) and regenerates the PDFs against it, so they're always current
+# as of the last time the dev environment was started.
+Write-Host "[QR] Regenerating gauge label PDFs for $apiUrl ..."
+python (Join-Path $root "scripts\generate_gauge_qr_labels.py") `
+    --db-path (Join-Path $root "data\cyclotron.db") `
+    --base-url $apiUrl `
+    --output-dir (Join-Path $root "qr_labels")
+
+# ── 7. Summary ───────────────────────────────────────────────────────────────
 
 Write-Host ""
 Write-Host "=============================================="

@@ -45,6 +45,11 @@ _LOCATION = 'Control Room'
 _ALERT_LO, _ALERT_HI = 0.5, 4.5
 _ACTION_LO, _ACTION_HI = 0.2, 5.5
 
+# Second gauge, different location -- lets the index-page tests verify more
+# than one entry / more than one location group actually shows up.
+_GAUGE_2 = 'G-201'
+_LOCATION_2 = 'HVAC Room - Cyclotron HEPA'
+
 
 def _seed():
     init_cloud_tables(_DB_PATH)
@@ -68,6 +73,15 @@ def _seed():
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             [_LAB_ID, _GAUGE, '2026-06-30T12:00:00Z', 1.4, 'bar', _LOCATION,
              _ALERT_LO, _ALERT_HI, _ACTION_LO, _ACTION_HI, 'high'],
+        )
+        # A second, different gauge/location -- for the index-page tests.
+        conn.execute(
+            "INSERT INTO gauge_readings "
+            "(lab_id, gauge_name, timestamp, value, unit, location, "
+            "alert_lo, alert_hi, action_lo, action_hi, confidence) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [_LAB_ID, _GAUGE_2, '2026-06-30T09:00:00Z', 2.3, 'Pa', _LOCATION_2,
+             0.0, 5.0, -1.0, 6.0, 'ok'],
         )
         # Junk-data case mirroring the real "MMG005" row: gauge_name is present
         # but location is empty -- must be treated as unknown/404.
@@ -158,3 +172,74 @@ def test_scan_post_is_not_allowed():
     with TestClient(main.app) as client:
         r = client.post(f'/scan/{quote(_GAUGE)}', json={'value': 999})
     assert r.status_code == 405
+
+
+# ── GET /scan (index website: every gauge, grouped, with its QR attached) ──
+
+def test_scan_index_lists_every_real_gauge():
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    assert r.status_code == 200
+    assert r.headers['content-type'].startswith('text/html')
+    body = r.text
+    # Both real gauges present, with their locations.
+    assert _GAUGE in body
+    assert _LOCATION in body
+    assert _GAUGE_2 in body
+    assert _LOCATION_2 in body
+    # The junk row (empty location) must never appear on the index.
+    assert 'MMG005' not in body
+
+
+def test_scan_index_uses_latest_reading_not_older_one():
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    assert '1.4' in r.text   # latest Beam on Post value
+    assert 'bar' in r.text
+
+
+def test_scan_index_embeds_a_qr_image_per_gauge():
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    body = r.text
+    assert f'/scan/{quote(_GAUGE)}/qr.png' in body or f'/scan/{_GAUGE}/qr.png' in body
+    assert f'/scan/{_GAUGE_2}/qr.png' in body
+
+
+def test_scan_index_requires_no_authorization_header():
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    assert r.status_code == 200
+
+
+# ── GET /scan/{gauge_name}/qr.png (the QR image itself) ────────────────────
+
+def test_scan_qr_png_returns_image():
+    with TestClient(main.app) as client:
+        r = client.get(f'/scan/{quote(_GAUGE_2)}/qr.png')
+    assert r.status_code == 200
+    assert r.headers['content-type'] == 'image/png'
+    assert len(r.content) > 0
+    assert r.content[:8] == b'\x89PNG\r\n\x1a\n'   # PNG magic bytes
+
+
+def test_scan_qr_png_is_deterministic_for_the_same_gauge():
+    """Two requests for the same gauge's QR must encode the same URL -> the
+    same pixels -> byte-identical PNGs (no hidden randomness/timestamps)."""
+    with TestClient(main.app) as client:
+        r1 = client.get(f'/scan/{quote(_GAUGE_2)}/qr.png')
+        r2 = client.get(f'/scan/{quote(_GAUGE_2)}/qr.png')
+    assert r1.content == r2.content
+
+
+def test_scan_qr_png_differs_between_gauges():
+    with TestClient(main.app) as client:
+        r1 = client.get(f'/scan/{quote(_GAUGE)}/qr.png')
+        r2 = client.get(f'/scan/{quote(_GAUGE_2)}/qr.png')
+    assert r1.content != r2.content
+
+
+def test_scan_qr_png_unknown_gauge_returns_404():
+    with TestClient(main.app) as client:
+        r = client.get('/scan/DoesNotExist/qr.png')
+    assert r.status_code == 404

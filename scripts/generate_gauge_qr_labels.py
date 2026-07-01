@@ -12,52 +12,20 @@ resolved when this script is actually run — never during import/collection).
 --output-dir defaults to "qr_labels" at the repo root.
 """
 import os
-import sqlite3
+import pathlib
+import sys
 
-import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
+# Resolve project root from scripts/ (same pattern as scripts/import_eur_forms.py)
+# so `python scripts/generate_gauge_qr_labels.py` works when invoked directly --
+# Python only puts this file's own directory on sys.path, not the repo root.
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from monitor.gauge_scan import build_qr, fetch_gauges, gauge_scan_url  # noqa: E402
+
 LABEL_BG = "#1a1a2e"
-
-
-def fetch_gauges(db_path):
-    """Return one dict per gauge: the latest reading, excluding rows with an
-    empty gauge_name or empty location."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            """
-            SELECT gauge_name, location, unit, value, alert_lo, alert_hi,
-                   action_lo, action_hi, confidence, timestamp
-            FROM gauge_readings
-            WHERE gauge_name != '' AND location != ''
-            ORDER BY timestamp ASC
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
-    latest = {}
-    for row in rows:
-        latest[row["gauge_name"]] = dict(row)
-    return list(latest.values())
-
-
-def gauge_scan_url(base_url, gauge_name):
-    return f"{base_url.rstrip('/')}/scan/{gauge_name}"
-
-
-def build_qr(url):
-    qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=8,
-        border=3,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    return qr
 
 
 def render_label_image(gauge_row, qr_image):

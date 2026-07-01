@@ -4,15 +4,78 @@ printed gauge label (phone camera, or the co-founder's separate GxP eQMS system)
 Deliberately unauthenticated (same idiom as api/routes/sync.py): no JWT, since the
 scanner has no way to log in first. Read-only.
 """
+from io import BytesIO
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.config import get_config
 from api.db_cloud import get_conn
+from monitor.gauge_scan import build_qr, fetch_gauges, gauge_scan_url
 
 router = APIRouter()
+
+_QR_BG = '#1a1a2e'
+
+
+def _gauges_by_name(db_path):
+    return {g['gauge_name']: g for g in fetch_gauges(db_path)}
+
+
+@router.get('/scan')
+def scan_index(request: Request):
+    """Website listing every logged gauge, grouped by location, each with its
+    QR code attached inline."""
+    cfg = get_config()
+    base_url = str(request.base_url).rstrip('/')
+    gauges = sorted(fetch_gauges(cfg['db_path']), key=lambda g: (g['location'], g['gauge_name']))
+
+    sections = []
+    current_location = None
+    for g in gauges:
+        if g['location'] != current_location:
+            current_location = g['location']
+            sections.append(f'<h2>{current_location}</h2>')
+        safe_name = quote(g['gauge_name'], safe='')
+        sections.append(f"""
+<div class="gauge">
+  <img src="/scan/{safe_name}/qr.png" width="140" height="140" alt="QR for {g['gauge_name']}">
+  <div>
+    <a href="/scan/{safe_name}"><strong>{g['gauge_name']}</strong></a><br>
+    {g['value']} {g['unit']} &middot; {g['timestamp']}<br>
+    alert {g['alert_lo']}&ndash;{g['alert_hi']} &middot; action {g['action_lo']}&ndash;{g['action_hi']}
+  </div>
+</div>""")
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Gauge QR Index</title></head>
+<body>
+<h1>All Gauges ({len(gauges)})</h1>
+{''.join(sections)}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@router.get('/scan/{gauge_name}/qr.png')
+def scan_qr_png(gauge_name: str, request: Request):
+    """The QR image itself -- what /scan (the index) embeds inline, and what
+    a printed label's QR encodes when scanned."""
+    cfg = get_config()
+    base_url = str(request.base_url).rstrip('/')
+    gauges = _gauges_by_name(cfg['db_path'])
+    if gauge_name not in gauges:
+        return JSONResponse(
+            status_code=404,
+            content={'error': 'unknown gauge', 'gauge_name': gauge_name},
+        )
+    url = gauge_scan_url(base_url, gauge_name)
+    qr_image = build_qr(url).make_image(fill_color='white', back_color=_QR_BG).convert('RGB')
+    buf = BytesIO()
+    qr_image.save(buf, format='PNG')
+    return Response(content=buf.getvalue(), media_type='image/png')
 
 
 @router.get('/scan/{gauge_name}')
