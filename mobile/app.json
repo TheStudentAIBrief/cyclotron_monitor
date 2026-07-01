@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PET Lab Monitor",
+    "name": "PetBMS",
     "slug": "petlab-monitor",
     "version": "1.0.0",
     "scheme": "petlab",
@@ -10,21 +10,21 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1a1a2e"
+      "backgroundColor": "#0056A7"
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.petlabs.monitor",
       "infoPlist": {
-        "NSCameraUsageDescription": "PET Lab Monitor uses the camera to photograph gauges and log readings.",
-        "NSPhotoLibraryUsageDescription": "PET Lab Monitor can access photos to select gauge images for logging."
+        "NSCameraUsageDescription": "PetBMS uses the camera to photograph gauges and log readings.",
+        "NSPhotoLibraryUsageDescription": "PetBMS can access photos to select gauge images for logging."
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1a1a2e"
+        "backgroundColor": "#0056A7"
       },
       "package": "com.petlabs.monitor",
       "permissions": ["android.permission.CAMERA"],
@@ -36,14 +36,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow PET Lab Monitor to access your photos.",
-          "cameraPermission": "Allow PET Lab Monitor to use the camera to log gauge readings."
+          "photosPermission": "Allow PetBMS to access your photos.",
+          "cameraPermission": "Allow PetBMS to use the camera to log gauge readings."
         }
       ],
       [
         "expo-notifications",
         {
-          "color": "#1a73e8"
+          "color": "#1863DC"
         }
       ]
     ],
