@@ -91,14 +91,14 @@ test('API_ASK_TIMEOUT_MS: is strictly greater than API_TIMEOUT_MS — Ask AI mus
 
 // ── API_OCR_TIMEOUT_MS ───────────────────────────────────────────────────────
 
-test('API_OCR_TIMEOUT_MS: defaults to 120000 — qwen2.5vl:7b vision OCR needs ≥2 min on CPU', () => {
+test('API_OCR_TIMEOUT_MS: defaults to 900000 — Gemini retry/backoff ceiling (~300s) + Ollama cold-start (15s) + Ollama 600s server timeout', () => {
   delete process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS;
   jest.resetModules();
-  expect(loadConfig().API_OCR_TIMEOUT_MS).toBe(120000);
+  expect(loadConfig().API_OCR_TIMEOUT_MS).toBe(900000);
 });
 
-test('API_OCR_TIMEOUT_MS: is at least 120000 — 30s causes OCR timeout before Ollama vision model responds', () => {
+test('API_OCR_TIMEOUT_MS: is at least 900000 — anything less can abort while Gemini retries/Ollama fallback are still legitimately working', () => {
   delete process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS;
   jest.resetModules();
-  expect(loadConfig().API_OCR_TIMEOUT_MS).toBeGreaterThanOrEqual(120000);
+  expect(loadConfig().API_OCR_TIMEOUT_MS).toBeGreaterThanOrEqual(900000);
 });

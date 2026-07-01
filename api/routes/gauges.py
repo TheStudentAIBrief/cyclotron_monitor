@@ -126,6 +126,46 @@ def _parse_ocr_result(result: dict) -> dict:
     }
 
 
+def _gemini_then_ollama(
+    prompt: str, image_b64: str, schema: dict, *, gemini_timeout: int, ollama_timeout: int,
+    ollama_options: Optional[dict] = None,
+) -> tuple[str, Optional[str]]:
+    """Try Gemini first; fall back to Ollama on any failure.
+
+    Returns (raw_json_text, gemini_err). gemini_err is None if Gemini succeeded
+    outright (or was never configured). Raises the Ollama exception if BOTH
+    fail; the exception is annotated with a `.gemini_err` attribute so the
+    caller can still report what Gemini did, even though this raises.
+    """
+    gemini_err: str | None = None
+    if gemini_ocr.is_configured():
+        try:
+            return gemini_ocr.call(prompt, image_b64, schema, timeout=gemini_timeout), None
+        except Exception as e:
+            gemini_err = f'{e.__class__.__name__}: {e}'
+            # fall through to Ollama
+
+    ensure_running()
+    try:
+        r = httpx.post(
+            f'{_OLLAMA_HOST}/api/generate',
+            json={
+                'model': _OLLAMA_MODEL,
+                'prompt': prompt,
+                'images': [image_b64],
+                'stream': False,
+                'format': schema,
+                'options': ollama_options or {'temperature': 0},
+            },
+            timeout=ollama_timeout,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        e.gemini_err = gemini_err
+        raise
+    return r.json().get('response', '{}'), gemini_err
+
+
 def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
     """Extract a numeric reading from a gauge photo.
 
@@ -133,43 +173,31 @@ def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
     configured or fails at runtime, falls back to the local Ollama vision model.
     """
     prompt = _build_ocr_prompt(gauge_name)
-    gemini_err: str | None = None
 
-    # ── Gemini primary ────────────────────────────────────────────────────────
-    if gemini_ocr.is_configured():
-        try:
-            raw = gemini_ocr.call(prompt, photo_b64, _OCR_SCHEMA, timeout=60)
-            return _parse_ocr_result(json.loads(raw))
-        except Exception as e:
-            gemini_err = f'{e.__class__.__name__}: {e}'
-            # fall through to Ollama
-
-    # ── Ollama fallback ───────────────────────────────────────────────────────
+    # Preserve exact prior behaviour: with no Ollama model configured at all,
+    # never touch the network for Ollama — Gemini-only (or nothing-configured).
     if not _OLLAMA_MODEL:
-        msg = (f'Gemini failed ({gemini_err}); Ollama not configured.'
-               if gemini_err else
-               'OCR not configured — set GEMINI_API_KEY or GAUGE_OLLAMA_MODEL')
-        return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '', 'raw_ocr_text': msg, 'ocr_ok': False}
+        if gemini_ocr.is_configured():
+            try:
+                raw = gemini_ocr.call(prompt, photo_b64, _OCR_SCHEMA, timeout=60)
+                return _parse_ocr_result(json.loads(raw))
+            except Exception as e:
+                gemini_err = f'{e.__class__.__name__}: {e}'
+                return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+                        'raw_ocr_text': f'Gemini failed ({gemini_err}); Ollama not configured.', 'ocr_ok': False}
+        return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+                'raw_ocr_text': 'OCR not configured — set GEMINI_API_KEY or GAUGE_OLLAMA_MODEL', 'ocr_ok': False}
+
     try:
-        ensure_running()
-        r = httpx.post(
-            f'{_OLLAMA_HOST}/api/generate',
-            json={
-                'model': _OLLAMA_MODEL,
-                'prompt': prompt,
-                'images': [photo_b64],
-                'stream': False,
-                'format': _OCR_SCHEMA,
-                'options': {'temperature': 0},
-            },
-            timeout=600,
+        raw, gemini_err = _gemini_then_ollama(
+            prompt, photo_b64, _OCR_SCHEMA, gemini_timeout=60, ollama_timeout=600,
         )
-        r.raise_for_status()
-        result = _parse_ocr_result(json.loads(r.json().get('response', '{}')))
+        result = _parse_ocr_result(json.loads(raw))
         if gemini_err:
             result['raw_ocr_text'] = f'[Ollama fallback; Gemini: {gemini_err}] ' + result['raw_ocr_text']
         return result
     except Exception as e:
+        gemini_err = getattr(e, 'gemini_err', None)
         _log.exception('Gauge OCR failed (Gemini err: %s)', gemini_err)
         return {
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
@@ -401,24 +429,10 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
         filename = req.filenames[i] if i < len(req.filenames) else f'upload_{i}.jpg'
         try:
             photo_bytes = base64.b64decode(b64)
-            if gemini_ocr.is_configured():
-                ocr_raw = gemini_ocr.call(EUR_OCR_PROMPT, b64, EUR_OCR_SCHEMA, timeout=120)
-            else:
-                ensure_running()
-                r = httpx.post(
-                    f'{_OLLAMA_HOST}/api/generate',
-                    json={
-                        'model': _OLLAMA_MODEL,
-                        'prompt': EUR_OCR_PROMPT,
-                        'images': [b64],
-                        'stream': False,
-                        'format': EUR_OCR_SCHEMA,
-                        'options': {'temperature': 0, 'num_ctx': 4096},
-                    },
-                    timeout=1200,
-                )
-                r.raise_for_status()
-                ocr_raw = r.json().get('response', '{}')
+            ocr_raw, _gemini_err = _gemini_then_ollama(
+                EUR_OCR_PROMPT, b64, EUR_OCR_SCHEMA, gemini_timeout=120, ollama_timeout=1200,
+                ollama_options={'temperature': 0, 'num_ctx': 4096},
+            )
             readings = parse_eur_response(ocr_raw)
             archive_import(filename, photo_bytes, ocr_raw, readings, archive_dir)
 

@@ -11,12 +11,22 @@ Setup: get a free API key at https://aistudio.google.com/app/apikey
 Set GEMINI_API_KEY in your environment, then restart the API server.
 """
 import os
+import random
+import time
 
 import httpx
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL   = os.environ.get('GEMINI_OCR_MODEL', 'gemini-2.0-flash')
 _BASE          = 'https://generativelanguage.googleapis.com/v1beta/models'
+
+_MAX_ATTEMPTS      = 4
+_BASE_DELAY        = 2
+_BACKOFF_FACTOR    = 2
+_MAX_RETRY_AFTER   = 30
+_JITTER_MAX        = 0.5
+
+_sleep = time.sleep
 
 
 def is_configured() -> bool:
@@ -67,8 +77,10 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
     """
     Send a vision prompt + image to Gemini. Returns the raw JSON response string.
 
-    Raises RuntimeError if GEMINI_API_KEY is not set.
-    Raises httpx.HTTPStatusError on API-level failures (4xx/5xx).
+    Raises RuntimeError if GEMINI_API_KEY is not set or the response carries no
+    usable content (safety block / recitation / truncation).
+    Raises httpx.HTTPStatusError on non-transient API failures.
+    Retries transient 429/5xx with exponential backoff (honors Retry-After).
     """
     if not GEMINI_API_KEY:
         raise RuntimeError('GEMINI_API_KEY is not set')
@@ -87,18 +99,30 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
             'maxOutputTokens': 1024,   # avoid mid-JSON truncation
         },
     }
-    r = httpx.post(
-        f'{_BASE}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}',
-        json=payload,
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    # Defensive parse: a safety block / recitation / empty result yields no content.
-    data = r.json()
-    candidates = data.get('candidates') or []
-    if not candidates or 'content' not in candidates[0]:
-        raise RuntimeError(f'Gemini returned no usable content: {data.get("promptFeedback") or candidates}')
-    text = ''.join(p.get('text', '') for p in candidates[0]['content'].get('parts', []))
-    if not text.strip():
-        raise RuntimeError('Gemini returned an empty response')
-    return text
+    url = f'{_BASE}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}'
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        r = httpx.post(url, json=payload, timeout=timeout)
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            transient = r.status_code == 429 or r.status_code >= 500
+            if not transient or attempt == _MAX_ATTEMPTS:
+                raise
+            retry_after = r.headers.get('Retry-After')
+            if retry_after is not None:
+                delay = min(float(retry_after), _MAX_RETRY_AFTER)
+            else:
+                delay = _BASE_DELAY * (_BACKOFF_FACTOR ** (attempt - 1))
+                delay += random.uniform(0, _JITTER_MAX)
+            _sleep(delay)
+            continue
+        # Defensive parse: a safety block / recitation / empty result yields no content.
+        data = r.json()
+        candidates = data.get('candidates') or []
+        if not candidates or 'content' not in candidates[0]:
+            raise RuntimeError(f'Gemini returned no usable content: {data.get("promptFeedback") or candidates}')
+        text = ''.join(p.get('text', '') for p in candidates[0]['content'].get('parts', []))
+        if not text.strip():
+            raise RuntimeError('Gemini returned an empty response')
+        return text

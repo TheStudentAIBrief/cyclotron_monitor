@@ -4,9 +4,12 @@ const Config = {
   // 30s gives WiFi cold-start enough headroom (10s was observed to timeout on WiFi).
   // Override with EXPO_PUBLIC_API_TIMEOUT_MS.
   API_TIMEOUT_MS: Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS) || 30000,
-  // Gauge photo OCR runs qwen2.5vl:7b via Ollama — needs ≥2 min on CPU.
+  // Gauge photo OCR: Gemini is primary (up to 4 attempts, each up to 60s network
+  // timeout, plus backoff sleeps up to 30s each — worst case ~300s), falling back
+  // to Ollama (up to 15s cold-start + up to 600s server-side generate timeout).
+  // Worst case across both phases can approach 900s, so the client must not abort sooner.
   // Override with EXPO_PUBLIC_API_OCR_TIMEOUT_MS.
-  API_OCR_TIMEOUT_MS: Number(process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS) || 120000,
+  API_OCR_TIMEOUT_MS: Number(process.env.EXPO_PUBLIC_API_OCR_TIMEOUT_MS) || 900000,
   // Ask AI runs a local LLM (mistral:7b) which can take several minutes on CPU.
   // This timeout must exceed the Ollama generate timeout on the server side (600s).
   API_ASK_TIMEOUT_MS: Number(process.env.EXPO_PUBLIC_API_ASK_TIMEOUT_MS) || 600000,
