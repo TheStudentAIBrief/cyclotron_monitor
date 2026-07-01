@@ -79,6 +79,11 @@ Write-Host "[SVC] Starting Ollama..."
 Start-Process cmd -ArgumentList "/k ollama serve"
 
 Write-Host "[SVC] Starting FastAPI..."
+# On-prem dev machines need Ollama as the gauge-OCR fallback (Gemini quota/outage).
+# The source default is intentionally empty for cloud/Render (no Ollama binary there,
+# and render.yaml sets its own env) — but start_dev.ps1 only ever runs for local dev,
+# so it's safe to hardcode the on-prem model here for the spawned FastAPI window.
+$env:GAUGE_OLLAMA_MODEL = 'qwen2.5vl:7b'
 Start-Process cmd -ArgumentList "/k `"cd /d `"$root`" && python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload`""
 
 Start-Sleep -Seconds 2   # let uvicorn bind before Metro prints the QR
