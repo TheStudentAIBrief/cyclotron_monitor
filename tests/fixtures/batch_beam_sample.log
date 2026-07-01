@@ -1,0 +1,8 @@
+Tracer: (1) Dummy P w/o He-cooling			Batch no: 1			Date: 2024-06-16
+Site name: geps
+
+Time	Arc-I	Arc-V	Gas flow	Dee-1-kV	Dee-2-kV	Magnet-I	Foil-I	Coll-l-I	Target-I	Coll-r-I	Vacuum-P	Target-P	Delta Dee-kV	Phase load	Dee ref-V	Probe-I	He cool-P	Flap1-pos	Flap2-pos	Step pos	Extr pos	Balance	RF fwd-W	RF refl-W	Foil No
+17:00:23 	0	0	0.1	0.0	0.0	426.6	0.0	0.0	0.0	0.0	7.46E-07	0.0	0.0	10.1	37.0	0.0	1.0	34.7	17.7	0.0	32.5	33.8	0.0	0.0	1
+17:00:26 	0	0	0.1	0.0	0.0	426.6	0.0	0.0	0.0	0.0	7.22E-07	0.0	0.0	10.3	37.0	0.0	0.2	34.7	17.7	0.0	32.5	33.8	0.0	0.0	1
+17:01:07 	48	1215	5.0	36.9	40.0	426.6	0.0	0.0	0.0	0.0	4.66E-06	0.0	3.1	3.9	37.0	21.6	1.0	45.1	21.8	0.0	35.1	27.3	11.4	0.1	1
+17:28:23 	0	0	0.1	0.0	0.0	426.9	0.0	0.0	0.0	0.0	3.76E-06	0.0	0.0	10.8	37.0	0.0	1.0	34.4	17.8	0.0	32.3	34.6	0.0	0.0	1
