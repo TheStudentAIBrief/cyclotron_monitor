@@ -12,6 +12,19 @@ const LEVEL_BAR: Record<string, string> = {
 export default function ComponentCard({ data }: { data: ComponentData }) {
   const barColor = LEVEL_BAR[data.alert_level] ?? '#2ecc71';
   const pct = Math.min(100, Math.max(0, data.pct_life_used ?? 0));
+  const isPerformance = data.component_type === 'performance';
+
+  // Performance components: bar grows as the metric degrades (small sliver = healthy, full = at threshold)
+  const displayPct = isPerformance ? Math.max(4, pct) : pct;
+  const barLabel = isPerformance
+    ? `${pct.toFixed(0)}% toward threshold${data.risk_score != null ? ` · risk ${(data.risk_score * 100).toFixed(0)}%` : ''}`
+    : `${pct.toFixed(0)}% of service interval used${data.risk_score != null ? ` · risk ${(data.risk_score * 100).toFixed(0)}%` : ''}`;
+
+  const daysLabel = (() => {
+    if (data.days_estimate != null) return `${data.days_estimate.toFixed(1)} d`;
+    if (data.alert_level === 'GREEN') return 'Stable';
+    return 'No trend data';
+  })();
 
   return (
     <View style={[styles.card, { borderLeftColor: barColor }]}>
@@ -23,20 +36,17 @@ export default function ComponentCard({ data }: { data: ComponentData }) {
 
       {/* Days remaining */}
       <View style={styles.row}>
-        <Text style={styles.label}>Days remaining</Text>
-        <Text style={[styles.value, { color: barColor }]}>
-          {data.days_estimate != null ? `${data.days_estimate.toFixed(1)} d` : 'N/A'}
+        <Text style={styles.label}>{isPerformance ? 'Days to threshold' : 'Days remaining'}</Text>
+        <Text style={[styles.value, { color: data.days_estimate != null ? barColor : '#666' }]}>
+          {daysLabel}
         </Text>
       </View>
 
-      {/* Life used progress bar */}
+      {/* Life used / health progress bar */}
       <View style={styles.barBg}>
-        <View style={[styles.barFill, { width: `${pct}%`, backgroundColor: barColor }]} />
+        <View style={[styles.barFill, { width: `${displayPct}%`, backgroundColor: barColor }]} />
       </View>
-      <Text style={styles.barLabel}>
-        {pct.toFixed(0)}% of service interval used
-        {data.risk_score != null ? ` · risk ${(data.risk_score * 100).toFixed(0)}%` : ''}
-      </Text>
+      <Text style={styles.barLabel}>{barLabel}</Text>
 
       {/* Last maintenance */}
       <View style={styles.row}>

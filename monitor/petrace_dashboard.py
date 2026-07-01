@@ -114,8 +114,33 @@ def _trend_reason(slope: float, days_est, unit: str) -> str | None:
     return s
 
 
+def _foil_muAh_per_day(batches: list, foil_no) -> float | None:
+    """Average µAh/day consumption rate for this foil from its batch history."""
+    foil_batches = sorted(
+        [b for b in batches if b.get('foil_no') == foil_no and (b.get('total_muAh') or 0) > 0],
+        key=lambda b: b.get('batch_no', 0),
+    )
+    if len(foil_batches) < 2:
+        return None
+    dates = []
+    for b in foil_batches:
+        d = b.get('batch_date', '')
+        if d:
+            try:
+                dates.append(date.fromisoformat(str(d)[:10]))
+            except (ValueError, TypeError):
+                pass
+    if len(dates) < 2:
+        return None
+    span = (max(dates) - min(dates)).days
+    if span == 0:
+        return None
+    total = sum(b.get('total_muAh', 0) or 0 for b in foil_batches)
+    return total / span
+
+
 def _comp(name, alert_level, pct_life_used, days_estimate, top_reasons,
-          risk_score, last_maintenance=None, counter_days=None):
+          risk_score, last_maintenance=None, counter_days=None, component_type='wear'):
     return {
         'name': name,
         'alert_level': alert_level,
@@ -126,6 +151,7 @@ def _comp(name, alert_level, pct_life_used, days_estimate, top_reasons,
         'primary_signal': 'COUNTER',
         'last_maintenance': last_maintenance,
         'counter_days': counter_days,
+        'component_type': component_type,
         'warning': None,
         'trained_at': None,
         'model_age_days': None,
@@ -215,24 +241,47 @@ def compute_petrace_dashboard(batches: list) -> dict:
     if vac_trend:
         vac_reasons.append(vac_trend)
 
+    # ── Foil days remaining: estimate from charge consumption rate ────────────────
+    bl1_rate = _foil_muAh_per_day(batches, bl1_foil) if bl1_foil is not None else None
+    bl2_rate = _foil_muAh_per_day(batches, bl2_foil) if bl2_foil is not None else None
+
+    def _foil_days(rate, used_muAh):
+        if rate is None or rate <= 0:
+            return None
+        remaining = FOIL_LIFE_MUAH - used_muAh
+        return round(max(0.0, remaining / rate), 1)
+
+    bl1_days = _foil_days(bl1_rate, bl1_muAh)
+    bl2_days = _foil_days(bl2_rate, bl2_muAh)
+
+    def _foil_reasons(used_muAh, pct, rate, days):
+        reasons = [f'{used_muAh:.0f} / {FOIL_LIFE_MUAH:.0f} µAh used ({pct:.0f}%)']
+        if rate is not None:
+            reasons.append(f'Usage rate: {rate:.1f} µAh/day')
+        if days is not None:
+            reasons.append(f'Est. {days:.0f}d remaining at current rate')
+        return reasons
+
     components = [
         _comp(
             name=f'Foil BL1 (#{bl1_foil})' if bl1_foil is not None else 'Foil BL1',
             alert_level=_level_foil(bl1_pct),
             pct_life_used=bl1_pct,
-            days_estimate=None,
-            top_reasons=[f'{bl1_muAh:.0f} / {FOIL_LIFE_MUAH:.0f} µAh used ({bl1_pct:.0f}%)'],
+            days_estimate=bl1_days,
+            top_reasons=_foil_reasons(bl1_muAh, bl1_pct, bl1_rate, bl1_days),
             risk_score=bl1_pct / 100,
             last_maintenance=bl1_date,
+            component_type='wear',
         ),
         _comp(
             name=f'Foil BL2 (#{bl2_foil})' if bl2_foil is not None else 'Foil BL2',
             alert_level=_level_foil(bl2_pct),
             pct_life_used=bl2_pct,
-            days_estimate=None,
-            top_reasons=[f'{bl2_muAh:.0f} / {FOIL_LIFE_MUAH:.0f} µAh used ({bl2_pct:.0f}%)'],
+            days_estimate=bl2_days,
+            top_reasons=_foil_reasons(bl2_muAh, bl2_pct, bl2_rate, bl2_days),
             risk_score=bl2_pct / 100,
             last_maintenance=bl2_date,
+            component_type='wear',
         ),
         _comp(
             name='Beam Current',
@@ -241,6 +290,7 @@ def compute_petrace_dashboard(batches: list) -> dict:
             days_estimate=beam_days,
             top_reasons=beam_reasons,
             risk_score=max(0.0, 1.0 - avg_beam / 84.0),
+            component_type='performance',
         ),
         _comp(
             name='RF System',
@@ -249,6 +299,7 @@ def compute_petrace_dashboard(batches: list) -> dict:
             days_estimate=rf_days,
             top_reasons=rf_reasons,
             risk_score=max(0.0, 1.0 - avg_rf),
+            component_type='performance',
         ),
         _comp(
             name='Vacuum System',
@@ -257,6 +308,7 @@ def compute_petrace_dashboard(batches: list) -> dict:
             days_estimate=vac_days,
             top_reasons=vac_reasons,
             risk_score=min(1.0, avg_vac / 5e-4),
+            component_type='performance',
         ),
     ]
 

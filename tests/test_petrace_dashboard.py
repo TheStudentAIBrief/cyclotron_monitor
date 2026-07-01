@@ -61,7 +61,7 @@ def test_all_components_have_required_fields():
     required = {'name', 'alert_level', 'pct_life_used', 'days_estimate',
                  'top_reasons', 'risk_score', 'primary_signal',
                  'last_maintenance', 'counter_days', 'warning',
-                 'trained_at', 'model_age_days'}
+                 'trained_at', 'model_age_days', 'component_type'}
     for comp in result['components']:
         for field in required:
             assert field in comp, f"Component '{comp.get('name')}' missing '{field}'"
@@ -385,3 +385,68 @@ def test_rising_vacuum_includes_trend_in_top_reasons():
     vac = next(c for c in result['components'] if 'Vacuum' in c['name'])
     reasons_text = ' '.join(vac['top_reasons']).lower()
     assert 'trend' in reasons_text or '/' in ' '.join(vac['top_reasons'])
+
+
+# ── component_type ────────────────────────────────────────────────────────────
+
+def test_foils_have_wear_component_type():
+    result = compute_petrace_dashboard([_batch()])
+    for comp in result['components']:
+        if 'Foil' in comp['name']:
+            assert comp['component_type'] == 'wear', f"{comp['name']} should be 'wear'"
+
+def test_beam_rf_vacuum_have_performance_component_type():
+    result = compute_petrace_dashboard([_batch()])
+    for comp in result['components']:
+        if comp['name'] in ('Beam Current', 'RF System', 'Vacuum System'):
+            assert comp['component_type'] == 'performance', \
+                f"{comp['name']} should be 'performance'"
+
+
+# ── Foil days remaining ───────────────────────────────────────────────────────
+
+def _dated_foil_batches(foil_no=3, muAh_per_batch=30.0, n=10):
+    """n batches spread across n days (1 per day) for a real rate estimate."""
+    return [
+        _batch(
+            batch_no=i + 1,
+            batch_date=(date(2025, 5, 1) + timedelta(days=i)).isoformat(),
+            foil_no=foil_no,
+            total_muAh=muAh_per_batch,
+            row_count=100,
+        )
+        for i in range(n)
+    ]
+
+def test_foil_days_estimate_computed_from_charge_rate():
+    """10 batches × 30 µAh over 9 days → rate=300/9≈33.3 µAh/day → ~81d remaining."""
+    batches = _dated_foil_batches(foil_no=3, muAh_per_batch=30.0, n=10)
+    result = compute_petrace_dashboard(batches)
+    foil = next(c for c in result['components'] if 'BL1' in c['name'])
+    assert foil['days_estimate'] is not None
+    assert foil['days_estimate'] > 0
+    # 300 µAh used, 2700 remaining, rate≈33.3/day → ~81 days
+    assert 70 < foil['days_estimate'] < 100
+
+def test_foil_days_estimate_none_when_same_date_batches():
+    """All batches on same date → span=0 → cannot compute rate → None."""
+    batches = _foil3_batches(n_batches=5, muAh_per_batch=60.0)
+    result = compute_petrace_dashboard(batches)
+    for comp in result['components']:
+        if 'Foil' in comp['name']:
+            assert comp['days_estimate'] is None
+
+def test_foil_days_estimate_includes_rate_in_reasons():
+    """When a rate can be computed, top_reasons should mention it."""
+    batches = _dated_foil_batches(foil_no=3, muAh_per_batch=30.0, n=10)
+    result = compute_petrace_dashboard(batches)
+    foil = next(c for c in result['components'] if 'BL1' in c['name'])
+    reasons_text = ' '.join(foil['top_reasons']).lower()
+    assert 'rate' in reasons_text or 'µah/day' in reasons_text
+
+def test_foil_days_estimate_zero_when_already_exhausted():
+    """Foil at or past 100% life → days_estimate=0."""
+    batches = _dated_foil_batches(foil_no=3, muAh_per_batch=500.0, n=10)  # 5000 µAh > 3000
+    result = compute_petrace_dashboard(batches)
+    foil = next(c for c in result['components'] if 'BL1' in c['name'])
+    assert foil['days_estimate'] == 0.0

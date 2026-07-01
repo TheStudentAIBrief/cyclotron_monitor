@@ -16,6 +16,7 @@ export interface ComponentData {
   warning: string | null;
   trained_at: string | null;
   model_age_days: number | null;
+  component_type?: 'wear' | 'performance';
 }
 
 export interface DashboardData {

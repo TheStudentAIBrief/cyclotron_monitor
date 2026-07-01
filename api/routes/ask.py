@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
+from api.ollama_manager import ensure_running
 
 router = APIRouter()
 
@@ -34,13 +35,6 @@ ANSWER:"""
 class AskRequest(BaseModel):
     question: str
 
-
-def _ollama_available() -> bool:
-    try:
-        httpx.get(f'{OLLAMA_HOST}/api/tags', timeout=4).raise_for_status()
-        return True
-    except Exception:
-        return False
 
 
 def _get_live_context(cfg: dict, lab_id: str) -> str:
@@ -90,11 +84,10 @@ def ask(req: AskRequest, user: dict = Depends(get_current_user)):
     if not question:
         return {'answer': 'Please ask a question.', 'model': ''}
 
-    if not _ollama_available():
-        raise HTTPException(
-            503,
-            detail='Ollama is not reachable. Start it with: ollama serve'
-        )
+    try:
+        ensure_running()
+    except RuntimeError as e:
+        raise HTTPException(503, detail=str(e))
 
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))

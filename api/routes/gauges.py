@@ -12,9 +12,11 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from api import gemini_ocr
 from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
+from api.ollama_manager import ensure_running
 from monitor.eur_form_parser import EUR_OCR_PROMPT, EUR_OCR_SCHEMA, parse_eur_response
 from monitor.gauge_archive import archive_import
 
@@ -78,18 +80,43 @@ class ManualReadingRequest(BaseModel):
     alert_reason: str = ''
 
 
-def _run_ocr(photo_b64: str) -> dict:
-    """Extract a numeric reading from a gauge photo using a local Ollama vision model.
+def _parse_ocr_result(result: dict) -> dict:
+    """Shared: turn a parsed OCR JSON dict into the gauge reading response shape."""
+    value = result.get('reading_value') if result.get('is_gauge') else None
+    return {
+        'value': value,
+        'unit': result.get('unit', ''),
+        'is_alert': False,
+        'alert_reason': '',
+        'raw_ocr_text': f"{result.get('confidence', '?')} confidence — {result.get('needle_reasoning', '')}",
+    }
 
-    Requires GAUGE_OLLAMA_MODEL env var (e.g. llava:7b) and Ollama running locally.
-    Falls back to a stub result if not configured.
+
+def _run_ocr(photo_b64: str) -> dict:
+    """Extract a numeric reading from a gauge photo.
+
+    Uses Gemini Vision if GEMINI_API_KEY is set (fast, cloud, angle-invariant),
+    falls back to the local Ollama vision model otherwise.
     """
+    # ── Gemini path ───────────────────────────────────────────────────────────
+    if gemini_ocr.is_configured():
+        try:
+            raw = gemini_ocr.call(_OCR_PROMPT, photo_b64, _OCR_SCHEMA, timeout=60)
+            return _parse_ocr_result(json.loads(raw))
+        except Exception as e:
+            return {
+                'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
+                'raw_ocr_text': f'Gemini OCR error: {e.__class__.__name__}: {e}',
+            }
+
+    # ── Ollama fallback ───────────────────────────────────────────────────────
     if not _OLLAMA_MODEL:
         return {
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
-            'raw_ocr_text': 'OCR not configured — set GAUGE_OLLAMA_MODEL env var (e.g. llava:7b)',
+            'raw_ocr_text': 'OCR not configured — set GEMINI_API_KEY or GAUGE_OLLAMA_MODEL',
         }
     try:
+        ensure_running()
         r = httpx.post(
             f'{_OLLAMA_HOST}/api/generate',
             json={
@@ -103,17 +130,7 @@ def _run_ocr(photo_b64: str) -> dict:
             timeout=600,
         )
         r.raise_for_status()
-        result = json.loads(r.json().get('response', '{}'))
-        value = result.get('reading_value') if result.get('is_gauge') else None
-        reasoning = result.get('needle_reasoning', '')
-        confidence = result.get('confidence', '?')
-        return {
-            'value': value,
-            'unit': result.get('unit', ''),
-            'is_alert': False,
-            'alert_reason': '',
-            'raw_ocr_text': f'{confidence} confidence — {reasoning}',
-        }
+        return _parse_ocr_result(json.loads(r.json().get('response', '{}')))
     except Exception as e:
         return {
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
@@ -336,20 +353,24 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
         filename = req.filenames[i] if i < len(req.filenames) else f'upload_{i}.jpg'
         try:
             photo_bytes = base64.b64decode(b64)
-            r = httpx.post(
-                f'{_OLLAMA_HOST}/api/generate',
-                json={
-                    'model': _OLLAMA_MODEL,
-                    'prompt': EUR_OCR_PROMPT,
-                    'images': [b64],
-                    'stream': False,
-                    'format': EUR_OCR_SCHEMA,
-                    'options': {'temperature': 0, 'num_ctx': 4096},
-                },
-                timeout=1200,
-            )
-            r.raise_for_status()
-            ocr_raw = r.json().get('response', '{}')
+            if gemini_ocr.is_configured():
+                ocr_raw = gemini_ocr.call(EUR_OCR_PROMPT, b64, EUR_OCR_SCHEMA, timeout=120)
+            else:
+                ensure_running()
+                r = httpx.post(
+                    f'{_OLLAMA_HOST}/api/generate',
+                    json={
+                        'model': _OLLAMA_MODEL,
+                        'prompt': EUR_OCR_PROMPT,
+                        'images': [b64],
+                        'stream': False,
+                        'format': EUR_OCR_SCHEMA,
+                        'options': {'temperature': 0, 'num_ctx': 4096},
+                    },
+                    timeout=1200,
+                )
+                r.raise_for_status()
+                ocr_raw = r.json().get('response', '{}')
             readings = parse_eur_response(ocr_raw)
             archive_import(filename, photo_bytes, ocr_raw, readings, archive_dir)
 
