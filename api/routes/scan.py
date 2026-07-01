@@ -50,13 +50,40 @@ def scan_index(request: Request):
 
     html = f"""<!DOCTYPE html>
 <html>
-<head><title>Gauge QR Index</title></head>
+<head>
+<title>Gauges</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gauges">
+<meta name="theme-color" content="{_QR_BG}">
+<link rel="apple-touch-icon" href="/scan/icon.png">
+</head>
 <body>
 <h1>All Gauges ({len(gauges)})</h1>
 {''.join(sections)}
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+@router.get('/scan/icon.png')
+def scan_icon_png():
+    """Home-screen icon for the /scan index (iOS 'Add to Home Screen' /
+    Android 'Add to Home screen' both look for apple-touch-icon). Without
+    this, the OS falls back to an auto-cropped screenshot of the page."""
+    from PIL import Image, ImageDraw
+
+    size = 180
+    img = Image.new('RGB', (size, size), _QR_BG)
+    draw = ImageDraw.Draw(img)
+    # Simple gauge-dial glyph: an arc + a needle, in white.
+    margin = 24
+    draw.arc((margin, margin, size - margin, size - margin), start=135, end=45, fill='white', width=10)
+    draw.line((size // 2, size // 2, size // 2 + 40, size // 2 - 40), fill='white', width=8)
+    draw.ellipse((size // 2 - 10, size // 2 - 10, size // 2 + 10, size // 2 + 10), fill='white')
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    return Response(content=buf.getvalue(), media_type='image/png')
 
 
 @router.get('/scan/{gauge_name}/qr.png')
@@ -124,7 +151,10 @@ def scan_gauge(gauge_name: str, request: Request, format: str = Query(None)):
 
     html = f"""<!DOCTYPE html>
 <html>
-<head><title>{gauge_name} — Gauge Scan</title></head>
+<head>
+<title>{gauge_name} — Gauge Scan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
 <body>
 <h1>{gauge_name}</h1>
 <p>Location: {row['location']}</p>

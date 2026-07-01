@@ -243,3 +243,39 @@ def test_scan_qr_png_unknown_gauge_returns_404():
     with TestClient(main.app) as client:
         r = client.get('/scan/DoesNotExist/qr.png')
     assert r.status_code == 404
+
+
+# ── Mobile "Add to Home Screen" support ─────────────────────────────────────
+
+def test_scan_index_has_mobile_viewport_meta():
+    """Without this, iOS/Android render the page zoomed-out/tiny by default."""
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in r.text
+
+
+def test_scan_index_is_addable_as_a_home_screen_app():
+    """iOS 'Add to Home Screen' opens full-screen (no Safari chrome) and uses
+    a named, iconned entry only when these are present."""
+    with TestClient(main.app) as client:
+        r = client.get('/scan')
+    body = r.text
+    assert '<meta name="apple-mobile-web-app-capable" content="yes">' in body
+    assert '<meta name="apple-mobile-web-app-title" content="Gauges">' in body
+    assert '<link rel="apple-touch-icon" href="/scan/icon.png">' in body
+    assert '<meta name="theme-color" content="#1a1a2e">' in body
+
+
+def test_scan_gauge_page_has_mobile_viewport_meta():
+    with TestClient(main.app) as client:
+        r = client.get(f'/scan/{quote(_GAUGE)}')
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in r.text
+
+
+def test_scan_icon_png_returns_image():
+    with TestClient(main.app) as client:
+        r = client.get('/scan/icon.png')
+    assert r.status_code == 200
+    assert r.headers['content-type'] == 'image/png'
+    assert r.content[:8] == b'\x89PNG\r\n\x1a\n'
+    assert len(r.content) > 0
