@@ -42,3 +42,33 @@ def test_ingest_is_idempotent(tmp_path):
     rows = conn.execute("SELECT COUNT(*) FROM maintenance_events").fetchone()[0]
     conn.close()
     assert rows == 2, "Second ingest must not duplicate rows (2 unique events in fixture)"
+
+
+def test_ingest_detects_batch_beam_files_without_beam_in_filename(tmp_path):
+    (tmp_path / "logs").mkdir()
+    shutil.copy(str(FIXTURE_DIR / "batch_beam_sample.log"),
+                str(tmp_path / "logs" / "1.log"))
+    db = str(tmp_path / "test.db")
+    stats = ingest_all(str(tmp_path / "logs"), db)
+    assert stats['batch_beam_files'] == 1
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT COUNT(*) FROM beam_daily").fetchone()[0]
+    conn.close()
+    assert rows > 0, "beam_daily should be populated from the batch-beam file"
+
+
+def test_ingest_batch_beam_files_idempotent(tmp_path):
+    (tmp_path / "logs").mkdir()
+    shutil.copy(str(FIXTURE_DIR / "batch_beam_sample.log"),
+                str(tmp_path / "logs" / "1.log"))
+    db = str(tmp_path / "test.db")
+    ingest_all(str(tmp_path / "logs"), db)
+    ingest_all(str(tmp_path / "logs"), db)
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT COUNT(*) FROM beam_daily").fetchone()[0]
+    conn.close()
+    # INSERT OR REPLACE keyed on (date, param) — re-running must not double rows
+    conn2 = sqlite3.connect(db)
+    rows2 = conn2.execute("SELECT COUNT(*) FROM beam_daily").fetchone()[0]
+    conn2.close()
+    assert rows == rows2
