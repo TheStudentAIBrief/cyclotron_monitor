@@ -48,13 +48,13 @@ def _build_ocr_prompt(gauge_name: str = '') -> str:
     """Context-aware OCR prompt using the operator-supplied gauge label."""
     parts = [
         "You are reading a laboratory instrument photographed in a PET cyclotron facility. "
-        "Instruments here include: pressure gauges (0–200 bar or 0–6000 psi), vacuum gauges "
-        "(range 1×10⁻⁸ to 1×10⁻² mbar, scale printed in scientific notation), gas flow "
+        "Instruments here include: pressure gauges (0-200 bar or 0-6000 psi), vacuum gauges "
+        "(range 1e-8 to 1e-2 mbar, scale printed in scientific notation), gas flow "
         "meters, and current/voltage monitors. ",
     ]
     if gauge_name.strip():
         parts.append(
-            f"The operator has labelled this instrument '{gauge_name.strip()}' — "
+            f"The operator has labelled this instrument '{gauge_name.strip()}' -- "
             "if multiple gauges are visible in the frame, focus on the one matching "
             "this label or the one closest to the camera. "
         )
@@ -68,13 +68,13 @@ def _build_ocr_prompt(gauge_name: str = '') -> str:
         "1. Confirm a gauge face with a printed scale and needle/pointer is visible. "
         "2. Read the minimum and maximum values marked on the scale. "
         "3. Count the scale divisions between major marks. "
-        "4. Locate the needle — note which two marks it sits between and estimate "
+        "4. Locate the needle -- note which two marks it sits between and estimate "
         "what fraction of that interval it has crossed (account for viewing angle). "
-        "5. Compute: reading = lower_mark + fraction × (upper_mark − lower_mark). "
+        "5. Compute: reading = lower_mark + fraction x (upper_mark - lower_mark). "
         "6. Copy the unit label exactly as printed on the dial (bar, psi, mbar, etc.). "
         "In needle_reasoning, write: the scale range you read, the two marks the needle "
         "is between, your estimated fraction, and the resulting value. "
-        "For scientific-notation dials (e.g. a multiplier of ×10⁻⁷) return reading_value "
+        "For scientific-notation dials (e.g. a multiplier of x10^-7) return reading_value "
         "as a plain float (e.g. 1.6e-7). "
         "If no readable instrument face is present, set is_gauge=false and reading_value=0."
     )
