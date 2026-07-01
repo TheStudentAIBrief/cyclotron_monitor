@@ -36,6 +36,14 @@ def _ok_json():
     return {'candidates': [{'content': {'parts': [{'text': '{"ok": true}'}]}}]}
 
 
+@pytest.fixture(autouse=True)
+def _ensure_gemini_key(monkeypatch):
+    # gemini_ocr reads GEMINI_API_KEY at import time; in the full suite the module
+    # can load (via api.main) before this file's os.environ.setdefault runs, leaving
+    # the module global empty. Set it directly so these retry tests are order-independent.
+    monkeypatch.setattr(gemini_ocr, 'GEMINI_API_KEY', 'test-key')
+
+
 def test_call_retries_on_429_then_succeeds(monkeypatch):
     calls = []
     sleeps = []

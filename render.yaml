@@ -13,6 +13,13 @@ services:
         value: /data/petlab.db
       - key: LAB_ID
         value: petlabs-pretoria
+      # Gauge-photo OCR runs in-cloud via Gemini (Render has no local Ollama).
+      # GEMINI_API_KEY is a secret — set its value in the Render dashboard; get a
+      # free key at https://aistudio.google.com/app/apikey
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_OCR_MODEL
+        value: gemini-2.0-flash
     disk:
       name: petlab-data
       mountPath: /data
