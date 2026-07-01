@@ -15,7 +15,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
-from api.routes import ask, dashboard, gauges, petrace, push, records, sync
+from api.routes import ask, dashboard, gauges, petrace, push, records, scan, sync
 
 
 @asynccontextmanager
@@ -92,3 +92,7 @@ app.include_router(petrace.router,   prefix='/api', dependencies=_auth)
 
 # Sync endpoint is protected by X-Sync-Key header (not JWT) — server-to-server only.
 app.include_router(sync.router, prefix='')
+
+# Scan endpoint is deliberately unauthenticated (no JWT) — QR-code scanners have no
+# way to log in first.
+app.include_router(scan.router, prefix='')

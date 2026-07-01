@@ -34,6 +34,9 @@ data/gauge_archive/
 # Raw gauge photos saved by the API on upload; not versioned.
 data/gauge_photos/
 
+# Generated QR-code gauge label PDFs; not versioned.
+qr_labels/
+
 # pip-tools compiled lockfile — commit this to pin supply chain
 # requirements-lock.txt is intentionally NOT listed here
 
