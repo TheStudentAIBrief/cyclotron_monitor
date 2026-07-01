@@ -11,12 +11,22 @@ Setup: get a free API key at https://aistudio.google.com/app/apikey
 Set GEMINI_API_KEY in your environment, then restart the API server.
 """
 import os
+import random
+import time
 
 import httpx
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL   = os.environ.get('GEMINI_OCR_MODEL', 'gemini-2.0-flash')
 _BASE          = 'https://generativelanguage.googleapis.com/v1beta/models'
+
+_MAX_ATTEMPTS      = 4
+_BASE_DELAY        = 2
+_BACKOFF_FACTOR    = 2
+_MAX_RETRY_AFTER   = 30
+_JITTER_MAX        = 0.5
+
+_sleep = time.sleep
 
 
 def is_configured() -> bool:
@@ -84,10 +94,22 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
             'temperature': 0,
         },
     }
-    r = httpx.post(
-        f'{_BASE}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}',
-        json=payload,
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    return r.json()['candidates'][0]['content']['parts'][0]['text']
+    url = f'{_BASE}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}'
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        r = httpx.post(url, json=payload, timeout=timeout)
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            transient = r.status_code == 429 or r.status_code >= 500
+            if not transient or attempt == _MAX_ATTEMPTS:
+                raise
+            retry_after = r.headers.get('Retry-After')
+            if retry_after is not None:
+                delay = min(float(retry_after), _MAX_RETRY_AFTER)
+            else:
+                delay = _BASE_DELAY * (_BACKOFF_FACTOR ** (attempt - 1))
+                delay += random.uniform(0, _JITTER_MAX)
+            _sleep(delay)
+            continue
+        return r.json()['candidates'][0]['content']['parts'][0]['text']

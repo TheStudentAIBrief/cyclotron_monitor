@@ -1,4 +1,4 @@
-# PET Lab Monitor — dev startup script
+﻿# PET Lab Monitor — dev startup script
 # Detects the current WiFi IP, writes mobile/.env, opens firewall ports, starts all services.
 # Run from repo root: .\start_dev.ps1
 # Run as Administrator on first use (needed to add firewall rules once).
@@ -112,7 +112,9 @@ canvas.save(out)
 print('QR saved:', out)
 "@
 
-python -c $qrScript
+$qrScriptPath = Join-Path $env:TEMP "petlab_qr_gen.py"
+Set-Content -Path $qrScriptPath -Value $qrScript -Encoding utf8
+python $qrScriptPath
 
 # ── 6. Summary ───────────────────────────────────────────────────────────────
 
