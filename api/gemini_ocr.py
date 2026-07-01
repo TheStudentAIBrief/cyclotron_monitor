@@ -58,6 +58,8 @@ def _gemini_schema(node):
             out[k] = [_gemini_schema(i) if isinstance(i, dict) else i for i in v]
         else:
             out[k] = v
+    if out.get('type') == 'string' and 'enum' in out:
+        out['format'] = 'enum'   # Gemini requires format:enum for string enums on stricter models
     return out
 
 
@@ -82,6 +84,7 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
             'response_mime_type': 'application/json',
             'response_schema': _gemini_schema(schema),
             'temperature': 0,
+            'maxOutputTokens': 1024,   # avoid mid-JSON truncation
         },
     }
     r = httpx.post(
@@ -90,4 +93,12 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
         timeout=timeout,
     )
     r.raise_for_status()
-    return r.json()['candidates'][0]['content']['parts'][0]['text']
+    # Defensive parse: a safety block / recitation / empty result yields no content.
+    data = r.json()
+    candidates = data.get('candidates') or []
+    if not candidates or 'content' not in candidates[0]:
+        raise RuntimeError(f'Gemini returned no usable content: {data.get("promptFeedback") or candidates}')
+    text = ''.join(p.get('text', '') for p in candidates[0]['content'].get('parts', []))
+    if not text.strip():
+        raise RuntimeError('Gemini returned an empty response')
+    return text

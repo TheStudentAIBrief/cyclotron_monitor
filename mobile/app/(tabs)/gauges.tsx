@@ -58,14 +58,29 @@ export default function GaugesScreen() {
         quality: 0.8,
         allowsEditing: false,
       });
-      if (result.canceled || !result.assets[0].base64) return;
+      if (result.canceled) return;
+      if (!result.assets[0].base64) {
+        setMessage({ text: 'Photo could not be encoded — please try again.', ok: false });
+        return;
+      }
 
       setPhotoUri(result.assets[0].uri);
       const ocr = await submitGaugePhoto(result.assets[0].base64, gaugeName) as Record<string, unknown>;
-      setOcrText(String(ocr.raw_ocr_text ?? ''));
-      if (ocr.value != null) setValue(String(ocr.value));
-      if (ocr.unit) setUnit(String(ocr.unit));
-      if (ocr.is_alert) setIsAlert(true);
+      if (ocr.value != null) {
+        setValue(String(ocr.value));
+        if (ocr.unit) setUnit(String(ocr.unit));
+        if (ocr.is_alert) setIsAlert(true);
+        setOcrText(String(ocr.raw_ocr_text ?? ''));
+      } else {
+        // No value read — don't present backend diagnostics as if they were a reading.
+        setOcrText('');
+        setMessage({
+          text: ocr.ocr_ok === false
+            ? 'AI reader unavailable — enter the value manually below.'
+            : 'Could not read a value from the photo — enter it manually below.',
+          ok: false,
+        });
+      }
     } catch (e: unknown) {
       setMessage({ text: e instanceof Error ? e.message : 'Photo capture failed', ok: false });
     } finally {

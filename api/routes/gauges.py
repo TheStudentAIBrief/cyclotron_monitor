@@ -2,6 +2,7 @@ import base64
 import csv
 import io
 import json
+import logging
 import math
 import os
 import uuid
@@ -21,9 +22,12 @@ from monitor.eur_form_parser import EUR_OCR_PROMPT, EUR_OCR_SCHEMA, parse_eur_re
 from monitor.gauge_archive import archive_import
 
 router = APIRouter()
+_log = logging.getLogger('cyclotron.gauges')
 
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-_OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', 'qwen2.5vl:7b').strip()
+# Ollama is opt-in (on-prem installs). Cloud uses Gemini. Empty default means an
+# unconfigured host reports "OCR not configured" instead of crashing on a missing binary.
+_OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', '').strip()
 
 # Bounds so a single authenticated request can't exhaust CPU/memory/disk. Each EUR
 # photo triggers a multi-second vision-model call, so cap the batch; cap the CSV so it
@@ -118,6 +122,7 @@ def _parse_ocr_result(result: dict) -> dict:
         'is_alert': False,
         'alert_reason': '',
         'raw_ocr_text': f"{result.get('confidence', '?')} confidence — {result.get('needle_reasoning', '')}",
+        'ocr_ok': True,
     }
 
 
@@ -144,7 +149,7 @@ def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
         msg = (f'Gemini failed ({gemini_err}); Ollama not configured.'
                if gemini_err else
                'OCR not configured — set GEMINI_API_KEY or GAUGE_OLLAMA_MODEL')
-        return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '', 'raw_ocr_text': msg}
+        return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '', 'raw_ocr_text': msg, 'ocr_ok': False}
     try:
         ensure_running()
         r = httpx.post(
@@ -165,12 +170,14 @@ def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
             result['raw_ocr_text'] = f'[Ollama fallback; Gemini: {gemini_err}] ' + result['raw_ocr_text']
         return result
     except Exception as e:
+        _log.exception('Gauge OCR failed (Gemini err: %s)', gemini_err)
         return {
             'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
             'raw_ocr_text': (
                 f'OCR failed — Gemini: {gemini_err or "not configured"}, '
                 f'Ollama: {e.__class__.__name__}'
             ),
+            'ocr_ok': False,
         }
 
 
@@ -195,6 +202,11 @@ def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_us
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
     photo_path = _save_photo(req.photo_b64, cfg['db_path'])
     result = _run_ocr(req.photo_b64, req.gauge_name)
+    # No value read (backend failure or unreadable photo) → don't persist a phantom
+    # NULL row; the photo is still archived and the operator enters the value manually.
+    if result.get('value') is None:
+        return {'id': None, 'timestamp': ts, 'gauge_name': req.gauge_name,
+                'photo_path': photo_path, **result}
     conn = get_conn(cfg['db_path'])
     try:
         cur = conn.execute(
