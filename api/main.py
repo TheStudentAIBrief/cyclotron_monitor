@@ -99,10 +99,12 @@ app.include_router(sync.router, prefix='')
 app.include_router(scan.router, prefix='')
 
 # Serve the Expo web export (the installable PWA) from the same Render deployment.
-# Built by `npm run build:web` in mobile/ (output is gitignored, not present until
-# built) — registered last, and only if present, so its catch-all "/{full_path}"
-# doesn't shadow the API routes above (they're matched first, in registration order)
-# and doesn't break environments that never ran the build.
+# mobile/dist is committed to the repo (built locally with `npx expo export
+# --platform web`, not at deploy time — Render's Python runtime bundles an old
+# Node, too old for Expo SDK 54's tooling) — registered last, and only if present,
+# so its catch-all "/{full_path}" doesn't shadow the API routes above (they're
+# matched first, in registration order) and doesn't break environments where
+# mobile/dist hasn't been built/committed yet.
 _WEB_BUILD_DIR = Path(__file__).parent.parent / 'mobile' / 'dist'
 if _WEB_BUILD_DIR.is_dir():
     _WEB_BUILD_DIR_RESOLVED = _WEB_BUILD_DIR.resolve()

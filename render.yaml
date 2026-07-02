@@ -2,10 +2,11 @@ services:
   - type: web
     name: petlab-api
     runtime: python
-    # Also builds the Expo web export (mobile/dist) so api/main.py has something to
-    # serve at "/" — mobile/dist is gitignored (build output), so without this step
-    # Render would only ever run the bare JSON API and never serve the PWA.
-    buildCommand: pip install -r requirements.txt && cd mobile && npm ci && npm run build:web
+    # mobile/dist (the Expo web export) is committed to the repo rather than built
+    # here — Render's Python runtime bundles an old Node (reported as Node 14),
+    # too old for Expo SDK 54's tooling. Rebuild locally with
+    # "npx expo export --platform web" and commit mobile/dist after any mobile change.
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:

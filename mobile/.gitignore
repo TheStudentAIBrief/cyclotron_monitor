@@ -1,6 +1,9 @@
 node_modules/
 .expo/
-dist/
+# dist/ is intentionally NOT ignored — Render's Python runtime build has no
+# reliable modern Node (reports Node 14, too old for Expo SDK 54), so the web
+# export is built locally and committed rather than built at deploy time.
+# Rebuild with: npx expo export --platform web
 npm-debug.*
 *.jks
 *.p8
