@@ -58,6 +58,33 @@ def test_predictor_risk_score_between_0_and_1(tmp_path):
     assert 0.0 <= result.risk_score <= 1.0
 
 
+def test_predictor_anomaly_score_defaults_to_none_when_not_supplied(tmp_path):
+    # Backward compatible: existing callers (backtest.py, monitor/watcher.py
+    # before this change) that don't pass anomaly_score must not break.
+    result = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01')
+    assert result.anomaly_score is None
+
+
+def test_predictor_anomaly_score_is_passed_through(tmp_path):
+    result = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01',
+                      anomaly_score=0.82)
+    assert result.anomaly_score == 0.82
+
+
+def test_predictor_anomaly_score_does_not_affect_alert_level_or_days(tmp_path):
+    # By design (see models/anomaly.py docstring): this is an additive,
+    # informational signal, not a gate. A high anomaly score must never
+    # suppress or alter the existing counter/model-driven alert - the six
+    # earlier experiments showed exactly how dangerous it is for a "smarter"
+    # signal to silently override the alerting logic that gives good detection.
+    baseline = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01')
+    with_anomaly = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01',
+                            anomaly_score=0.99)
+    assert with_anomaly.alert_level == baseline.alert_level
+    assert with_anomaly.days_estimate == baseline.days_estimate
+    assert with_anomaly.risk_score == baseline.risk_score
+
+
 def _build_synthetic_db(tmp_path, n_cycles=4, cycle_len=46):
     # Include all 5 IS params so features have <30% NaN and rows aren't filtered out
     IS_PARAMS = ['AI_IS_CUR', 'AI_IS_VOLT', 'AI_BIAS_VOLT', 'AI_BIAS_CUR', 'AI_BOP_CUR']

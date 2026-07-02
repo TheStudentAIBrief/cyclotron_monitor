@@ -85,6 +85,11 @@ class PredictionResult:
     counter_days: float
     warning: str = None
     trained_at: str = None
+    # Additive/informational only — see models/anomaly.py. Never gates or
+    # changes alert_level/days_estimate/risk_score; six independent blend
+    # experiments showed how dangerous it is for a "smarter" signal to
+    # silently override the alerting logic that gives good detection.
+    anomaly_score: float = None
 
 
 def _alert_level(days: float) -> str:
@@ -123,7 +128,8 @@ def _reason(name: str, value) -> str:
 
 
 def predict(component: str, features: dict, model_dir: str,
-            counter_days: float, last_maintenance: str) -> PredictionResult:
+            counter_days: float, last_maintenance: str,
+            anomaly_score: float = None) -> PredictionResult:
     safe = component.lower().replace(' ', '_')
     model_path = Path(model_dir) / f'{safe}_model.pkl'
     cal_path = Path(model_dir) / f'{safe}_days_calibrator.pkl'
@@ -156,6 +162,7 @@ def predict(component: str, features: dict, model_dir: str,
             last_maintenance=last_maintenance or 'Unknown',
             counter_days=counter_days,
             warning=no_model_warning,
+            anomaly_score=anomaly_score,
         )
 
     saved = _load_verified(model_path)
@@ -206,4 +213,5 @@ def predict(component: str, features: dict, model_dir: str,
         counter_days=counter_days,
         warning=model_warning,
         trained_at=model_trained_at,
+        anomaly_score=anomaly_score,
     )
