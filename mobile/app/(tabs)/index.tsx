@@ -9,6 +9,9 @@ import {
 } from '../../services/api';
 import ComponentCard from '../../components/ComponentCard';
 import { Colors } from '../../constants/Theme';
+import {
+  summarizeBeamTrend, recentGaugeHistory, BeamTrendRow, GaugeHistoryRow,
+} from '../../utils/dashboardWidgets';
 
 type ActiveView = null | 'main' | 'petrace';
 
@@ -76,6 +79,64 @@ const sel = StyleSheet.create({
   textWrap: { flex: 1 },
   cardTitle: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
   cardDesc:  { color: '#666', fontSize: 13, lineHeight: 18 },
+});
+
+// ── Beam-trend / gauge-history widgets ──────────────────────────────────────
+
+function BeamTrendCard({ rows }: { rows: BeamTrendRow[] }) {
+  const summary = summarizeBeamTrend(rows);
+  return (
+    <View style={widgets.card}>
+      <Text style={widgets.cardTitle}>Beam Parameters</Text>
+      {summary.length === 0 ? (
+        <Text style={widgets.empty}>No beam data yet</Text>
+      ) : (
+        summary.map((s) => (
+          <View key={s.param} style={widgets.row}>
+            <Text style={widgets.rowLabel}>{s.param}</Text>
+            <Text style={widgets.rowValue}>{s.latest != null ? s.latest.toPrecision(3) : '—'}</Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+function GaugeHistoryCard({ rows }: { rows: GaugeHistoryRow[] }) {
+  const recent = recentGaugeHistory(rows);
+  return (
+    <View style={widgets.card}>
+      <Text style={widgets.cardTitle}>Gauge Photo History</Text>
+      {recent.length === 0 ? (
+        <Text style={widgets.empty}>No gauge photos yet</Text>
+      ) : (
+        recent.map((r, i) => (
+          <View key={`${r.gauge_name}-${r.timestamp}-${i}`} style={widgets.row}>
+            <Text style={widgets.rowLabel}>{r.gauge_name || 'Unnamed gauge'}</Text>
+            <Text style={widgets.rowValue}>
+              {r.value != null ? `${r.value} ${r.unit}` : '—'}
+            </Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+const widgets = StyleSheet.create({
+  card: {
+    backgroundColor: Colors.surfaceDark,
+    borderWidth: 1, borderColor: Colors.borderDark,
+    borderRadius: 10, padding: 14, marginBottom: 10,
+  },
+  cardTitle: { color: Colors.white, fontSize: 14, fontWeight: '700', marginBottom: 8 },
+  empty: { color: '#666', fontSize: 12 },
+  row: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  rowLabel: { color: '#8aa', fontSize: 12 },
+  rowValue: { color: Colors.white, fontSize: 12, fontWeight: '600' },
 });
 
 // ── Shared dashboard view ─────────────────────────────────────────────────────
@@ -184,6 +245,8 @@ function DashboardView({
               <Text style={dash.generatedAt}>
                 As of {new Date(data.generated_at).toLocaleString()}
               </Text>
+              <BeamTrendCard rows={data.beam_trend ?? []} />
+              <GaugeHistoryCard rows={data.gauge_history ?? []} />
             </View>
           ) : null
         }
