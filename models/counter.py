@@ -6,16 +6,23 @@ from datetime import date, datetime, timedelta
 # Fallback constants — used when fewer than 4 maintenance events exist in history.
 # dynamic_avg_cycle() supersedes these for components with sufficient event history.
 AVG_CYCLES = {'ION SOURCE': 46, 'FOILS': 78, 'BL1 Target 1': 51, 'BL2 Target 1': 56, 'TRANSFER LINES': 35}
-COUNTER_THRESHOLD = 9999.0
+# Real vendor warning-message prefixes (events table, code 11001), e.g.
+# "ion source Amp-hrs lifetime counter 45 is over 45" — NOT the same as the
+# internal setlifetime{} command keys used by parsers/maintenance_labels.py
+# (isc_amphrs etc.), which is a different vocabulary for a different purpose.
+# Confirmed against production log data for ION SOURCE, all three BL1 foils,
+# and BL1 Target 1. BL2 foil/target prefixes below are UNVERIFIED — no BL2
+# warning message of this form has ever appeared in ingested logs; extrapolated
+# from the BL1 naming convention and should be confirmed once BL2 telemetry exists.
 COMPONENT_KEYS = {
-    'ION SOURCE': 'isc_amphrs', 'FOILS': 'bl1_foil1_uamphrs',
-    'BL1 Target 1': 'bl1_targ1_uamphrs', 'BL2 Target 1': 'bl2_targ1_uamphrs',
+    'ION SOURCE': 'ion source Amp-hrs', 'FOILS': 'BL1 foil 1 uAmp-hrs',
+    'BL1 Target 1': 'BL1 target 1 uAmp-hrs', 'BL2 Target 1': 'BL2 target 1 uAmp-hrs',
     'TRANSFER LINES': '',  # no µAh counter — calendar-only
 }
 # All six foil µAh counters — get_counter_days checks each to find the most-worn foil.
 FOILS_COUNTER_KEYS = (
-    'bl1_foil1_uamphrs', 'bl1_foil2_uamphrs', 'bl1_foil3_uamphrs',
-    'bl2_foil1_uamphrs', 'bl2_foil2_uamphrs', 'bl2_foil3_uamphrs',
+    'BL1 foil 1 uAmp-hrs', 'BL1 foil 2 uAmp-hrs', 'BL1 foil 3 uAmp-hrs',
+    'BL2 foil 1 uAmp-hrs', 'BL2 foil 2 uAmp-hrs', 'BL2 foil 3 uAmp-hrs',
 )
 FOILS_LABELS = ('BL1 Foil 1', 'BL1 Foil 2', 'BL1 Foil 3',
                  'BL2 Foil 1', 'BL2 Foil 2', 'BL2 Foil 3')
@@ -79,15 +86,25 @@ def _uah_days_remaining(conn, comp_key: str, window_start: str,
     checkpoint date when computing point-in-time estimates (backtest) to avoid
     seeing future events.  None = no upper bound (production use).
     """
+    # `code='11001'` alone never matches real production data — confirmed against
+    # data/cyclotron.db that `code` is NULL for every one of these rows; the
+    # marker only ever appears as literal text inside the message, e.g.
+    # "...lifetime counter 9000 is over 9000 (Warn 11001)". Match on that exact
+    # parenthesized marker (not a bare '%11001%', which also matches unrelated
+    # numeric noise like "6.11001" elsewhere in the real log data) in addition
+    # to the code column, so this works whether a given log format populates
+    # code correctly or not.
     if window_end is not None:
         warnings = conn.execute(
-            "SELECT timestamp, message FROM events WHERE code='11001' "
+            "SELECT timestamp, message FROM events "
+            "WHERE (code='11001' OR message LIKE '%(Warn 11001)%') "
             "AND message LIKE ? AND timestamp>=? AND timestamp<? ORDER BY timestamp",
             [f'%{comp_key}%', window_start, window_end]
         ).fetchall()
     else:
         warnings = conn.execute(
-            "SELECT timestamp, message FROM events WHERE code='11001' "
+            "SELECT timestamp, message FROM events "
+            "WHERE (code='11001' OR message LIKE '%(Warn 11001)%') "
             "AND message LIKE ? AND timestamp>=? ORDER BY timestamp",
             [f'%{comp_key}%', window_start]
         ).fetchall()
@@ -95,11 +112,13 @@ def _uah_days_remaining(conn, comp_key: str, window_start: str,
         return None
 
     readings: list[float] = []
+    thresholds: list[float] = []
     times: list[datetime] = []
     for ts_str, msg in warnings:
         m = _COUNTER_RE.search(msg)
         if m:
             readings.append(float(m.group(2)))
+            thresholds.append(float(m.group(3)))
             try:
                 times.append(datetime.fromisoformat(ts_str.replace(' ', 'T')))
             except (ValueError, TypeError):
@@ -129,7 +148,13 @@ def _uah_days_remaining(conn, comp_key: str, window_start: str,
 
     rate_per_hour = (readings[-1] - readings[0]) / max(0.01, elapsed_hours)
     daily_rate = max(0.001, rate_per_hour * 24)
-    return (COUNTER_THRESHOLD - readings[-1]) / daily_rate
+    # Use the threshold the machine itself reported in its most recent warning
+    # message, not a hardcoded constant — vendor firmware has been observed to
+    # change this value over time (e.g. ION SOURCE moved from 40 to 45 in 2024-11).
+    # Clamped to 0 so a counter already past threshold reads "0 days remaining"
+    # rather than an unbounded negative number (mirrors the calendar fallback's
+    # own clamp below).
+    return max(0.0, (thresholds[-1] - readings[-1]) / daily_rate)
 
 
 def get_counter_days(component_label: str, db_path: str,
