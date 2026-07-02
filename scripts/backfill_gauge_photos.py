@@ -1,3 +1,12 @@
+"""Direct-to-DB gauge photo backfill (no running API server required).
+
+For most real-world imports, prefer scripts/import_gauge_photos.py instead --
+it downscales images to 1920px before OCR (avoiding Ollama context-size/memory
+issues on full-resolution phone photos) and goes through the live, authenticated
+/api/gauges/reading endpoint, which is the same code path a real submission
+takes. This script exists for cold-start seeding when the API server isn't
+running yet (writes to gauge_readings directly via api.db_cloud.get_conn).
+"""
 import base64
 import sys
 from datetime import datetime, timezone
