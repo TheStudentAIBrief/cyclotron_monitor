@@ -13,7 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
-from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
+from api.auth import (
+    authenticate, create_tokens, ensure_bootstrap_credentials, get_current_user,
+    get_refresh_payload,
+)
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
 from api.routes import ask, dashboard, gauges, petrace, push, records, scan, sync
@@ -23,6 +26,10 @@ from api.routes import ask, dashboard, gauges, petrace, push, records, scan, syn
 async def lifespan(app: FastAPI):
     cfg = get_config()
     init_cloud_tables(cfg['db_path'])
+    # No-op if data/.credentials.json already exists or BOOTSTRAP_USERNAME/
+    # BOOTSTRAP_PASSWORD aren't set — only matters on a fresh disk (new deploy)
+    # where setup_credentials.py's interactive prompt has no terminal to run in.
+    ensure_bootstrap_credentials(cfg['db_path'])
     yield
 
 

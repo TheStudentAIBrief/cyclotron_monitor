@@ -57,6 +57,43 @@ def authenticate(username: str, password: str) -> bool:
     return _verify_password(password, creds['hash'])
 
 
+def _hash_password(password: str) -> str:
+    """Same PBKDF2-SHA256 format _verify_password expects (salt[:32] + dk)."""
+    salt = secrets.token_bytes(32)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 600_000)
+    return base64.b64encode(salt + dk).decode('ascii')
+
+
+def ensure_bootstrap_credentials(db_path: str) -> None:
+    """Create data/.credentials.json from BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD
+    env vars on first boot of a fresh deploy (e.g. a new Render disk), where
+    setup_credentials.py's interactive prompt can't run. Never overwrites an
+    existing credentials file, and does nothing if either env var is unset —
+    a deploy without them configured just can't log in yet, it doesn't crash.
+    """
+    creds_path = Path(db_path).parent / '.credentials.json'
+    if creds_path.exists():
+        return
+    username = os.environ.get('BOOTSTRAP_USERNAME', '').strip()
+    password = os.environ.get('BOOTSTRAP_PASSWORD', '')
+    if not username or not password:
+        return
+    if len(password) < 12:
+        logging.getLogger('uvicorn.error').warning(
+            'BOOTSTRAP_PASSWORD is set but shorter than 12 characters — refusing '
+            'to create credentials. Set a longer BOOTSTRAP_PASSWORD and restart.'
+        )
+        return
+    creds_path.parent.mkdir(parents=True, exist_ok=True)
+    creds_path.write_text(
+        json.dumps({'username': username, 'hash': _hash_password(password)}),
+        encoding='utf-8',
+    )
+    logging.getLogger('uvicorn.error').info(
+        'Bootstrapped credentials for user %r at %s', username, creds_path,
+    )
+
+
 def create_tokens(username: str, lab_id: str) -> dict:
     now = datetime.now(timezone.utc)
     access = jwt.encode(

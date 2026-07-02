@@ -18,6 +18,15 @@ services:
         value: /data/petlab.db
       - key: LAB_ID
         value: petlabs-pretoria
+      # Bootstraps data/.credentials.json on first boot (fresh disk has no login
+      # yet, and the interactive setup_credentials.py script can't run in a
+      # deploy). Only takes effect once, when no credentials file exists yet —
+      # safe to leave set after the first successful deploy. Password must be
+      # at least 12 characters.
+      - key: BOOTSTRAP_USERNAME
+        sync: false
+      - key: BOOTSTRAP_PASSWORD
+        sync: false
       # Gauge-photo OCR runs in-cloud via Gemini (Render has no local Ollama).
       # GEMINI_API_KEY is a secret — set its value in the Render dashboard; get a
       # free key at https://aistudio.google.com/app/apikey
