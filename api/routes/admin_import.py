@@ -59,6 +59,44 @@ class PetraceBatchImport(BaseModel):
     rows: list[PetraceBatchRow]
 
 
+class MaintenanceEventRow(BaseModel):
+    timestamp: str
+    component_key: str
+    component_label: str
+    source_file: str | None = None
+
+
+class MaintenanceEventImport(BaseModel):
+    rows: list[MaintenanceEventRow]
+
+
+class PredictionRow(BaseModel):
+    run_at: str
+    component: str
+    risk_score: float | None = None
+    days_estimate: float | None = None
+    alert_level: str = ''
+    primary_signal: str = ''
+    top_features: str | None = None
+
+
+class PredictionImport(BaseModel):
+    rows: list[PredictionRow]
+
+
+class EventRow(BaseModel):
+    timestamp: str
+    severity: str = ''
+    code: str = ''
+    function: str = ''
+    message: str = ''
+    source_file: str | None = None
+
+
+class EventImport(BaseModel):
+    rows: list[EventRow]
+
+
 class GaugeReadingRow(BaseModel):
     lab_id: str
     gauge_name: str = ''
@@ -124,6 +162,58 @@ def import_petrace_batches(payload: PetraceBatchImport):
                  row.peak_target_uA, row.avg_target_uA, row.total_muAh,
                  row.avg_arc_I, row.avg_vacuum_P, row.peak_vacuum_P,
                  row.rf_efficiency, row.ingested_at],
+            )
+        conn.commit()
+        return {'inserted': len(payload.rows)}
+    finally:
+        conn.close()
+
+
+@router.post('/admin/import/maintenance-events')
+def import_maintenance_events(payload: MaintenanceEventImport):
+    _check_batch_size(payload.rows)
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    try:
+        for row in payload.rows:
+            conn.execute(
+                "INSERT OR REPLACE INTO maintenance_events VALUES (?,?,?,?)",
+                [row.timestamp, row.component_key, row.component_label, row.source_file],
+            )
+        conn.commit()
+        return {'inserted': len(payload.rows)}
+    finally:
+        conn.close()
+
+
+@router.post('/admin/import/predictions')
+def import_predictions(payload: PredictionImport):
+    _check_batch_size(payload.rows)
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    try:
+        for row in payload.rows:
+            conn.execute(
+                "INSERT OR REPLACE INTO predictions VALUES (?,?,?,?,?,?,?)",
+                [row.run_at, row.component, row.risk_score, row.days_estimate,
+                 row.alert_level, row.primary_signal, row.top_features],
+            )
+        conn.commit()
+        return {'inserted': len(payload.rows)}
+    finally:
+        conn.close()
+
+
+@router.post('/admin/import/events')
+def import_events(payload: EventImport):
+    _check_batch_size(payload.rows)
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    try:
+        for row in payload.rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)",
+                [row.timestamp, row.severity, row.code, row.function, row.message, row.source_file],
             )
         conn.commit()
         return {'inserted': len(payload.rows)}

@@ -1,9 +1,19 @@
-node_modules/
+/node_modules/
 .expo/
 # dist/ is intentionally NOT ignored — Render's Python runtime build has no
 # reliable modern Node (reports Node 14, too old for Expo SDK 54), so the web
 # export is built locally and committed rather than built at deploy time.
 # Rebuild with: npx expo export --platform web
+#
+# node_modules/ above is anchored to the repo root (leading slash) rather than
+# a bare "node_modules/", which would also match dist/assets/node_modules/ —
+# Expo's web export vendors @expo/vector-icons' font files under a path that
+# happens to be named node_modules, and a bare pattern silently dropped them
+# from every dist commit (confirmed: 0 files tracked under
+# dist/assets/node_modules/ despite `git add mobile/dist`), which is why
+# every icon in the deployed PWA rendered as an empty square — the font file
+# itself was never in the repo, so Render served the SPA-fallback index.html
+# (200, wrong content-type) for every font request instead of a 404.
 npm-debug.*
 *.jks
 *.p8

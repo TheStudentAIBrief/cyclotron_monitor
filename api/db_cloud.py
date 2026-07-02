@@ -71,6 +71,35 @@ CREATE TABLE IF NOT EXISTS beam_daily (
     PRIMARY KEY (date, param)
 );
 
+-- Records tab data (mirrors the local db.py schema) — same one-time/periodic
+-- push model as beam_daily above, via /api/admin/import/*.
+CREATE TABLE IF NOT EXISTS maintenance_events (
+    timestamp TEXT NOT NULL,
+    component_key TEXT NOT NULL,
+    component_label TEXT NOT NULL,
+    source_file TEXT,
+    PRIMARY KEY (timestamp, component_key)
+);
+CREATE TABLE IF NOT EXISTS predictions (
+    run_at TEXT NOT NULL,
+    component TEXT NOT NULL,
+    risk_score REAL,
+    days_estimate REAL,
+    alert_level TEXT,
+    primary_signal TEXT,
+    top_features TEXT,
+    PRIMARY KEY (run_at, component)
+);
+CREATE TABLE IF NOT EXISTS events (
+    timestamp TEXT NOT NULL,
+    severity TEXT,
+    code TEXT,
+    function TEXT,
+    message TEXT,
+    source_file TEXT,
+    UNIQUE(timestamp, source_file, code, function)
+);
+
 -- Append-only audit log (NNR). Records deletions/mutations of regulated records:
 -- who did what, when, and the prior content — so a record can't vanish without a trace.
 CREATE TABLE IF NOT EXISTS audit_log (

@@ -39,14 +39,28 @@ _ENDPOINTS = {
         'photo_path', 'raw_ocr_text', 'location', 'alert_lo', 'alert_hi', 'action_lo',
         'action_hi', 'confidence', 'verified_by', 'verified_at',
     ]),
+    'maintenance_events': ('maintenance-events', [
+        'timestamp', 'component_key', 'component_label', 'source_file',
+    ]),
+    'predictions': ('predictions', [
+        'run_at', 'component', 'risk_score', 'days_estimate', 'alert_level',
+        'primary_signal', 'top_features',
+    ]),
+    'events': ('events', ['timestamp', 'severity', 'code', 'function', 'message', 'source_file']),
 }
+
+# events is 3.6M+ rows locally (raw debug/verbose log stream) — far too large to
+# push wholesale. Only genuinely fault-relevant severities are worth having on
+# the cloud "Faults" record view; debug/verbose/info are noise for that purpose.
+_EVENTS_SEVERITY_FILTER = "severity IN ('error', 'note')"
 
 
 def _read_rows(db_path: str, table: str, columns: list) -> list:
     conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
     conn.row_factory = sqlite3.Row
     cols_sql = ', '.join(columns)
-    rows = conn.execute(f'SELECT {cols_sql} FROM {table}').fetchall()
+    where = f' WHERE {_EVENTS_SEVERITY_FILTER}' if table == 'events' else ''
+    rows = conn.execute(f'SELECT {cols_sql} FROM {table}{where}').fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -73,7 +87,10 @@ def main():
     parser.add_argument('--api', required=True, help='Base URL of the deployed API, e.g. https://petlab-api-qad3.onrender.com')
     parser.add_argument('--db-path', default=str(ROOT / 'data' / 'cyclotron.db'))
     parser.add_argument('--batch-size', type=int, default=1000)
-    parser.add_argument('--tables', default='beam_daily,gauge_readings,petrace_batches')
+    parser.add_argument(
+        '--tables',
+        default='beam_daily,gauge_readings,petrace_batches,maintenance_events,predictions,events',
+    )
     args = parser.parse_args()
 
     username = os.environ.get('PETLAB_USER')

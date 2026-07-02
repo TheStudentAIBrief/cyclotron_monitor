@@ -33,7 +33,7 @@ function SelectorScreen({ onSelect }: { onSelect: (v: 'main' | 'petrace') => voi
           <Ionicons name="pulse" size={32} color={Colors.primary} />
         </View>
         <View style={sel.textWrap}>
-          <Text style={sel.cardTitle}>IBA Cyclone 18/9</Text>
+          <Text style={sel.cardTitle}>Siemens</Text>
           <Text style={sel.cardDesc}>ML maintenance predictions · beam log analysis</Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color="#555" />
@@ -308,7 +308,7 @@ export default function DashboardScreen() {
     return (
       <DashboardView
         fetchFn={getDashboard}
-        title="IBA Cyclone 18/9"
+        title="Siemens"
         subtitle="ML maintenance predictions"
         onBack={() => setView(null)}
       />

@@ -105,6 +105,47 @@ def test_import_petrace_batches_accepts_null_numeric_fields(db_path):
     assert r.json() == {'inserted': 1}
 
 
+def test_import_maintenance_events_inserts_and_upserts(db_path):
+    row = {'timestamp': '2026-01-01T00:00:00Z', 'component_key': 'isc_amphrs',
+           'component_label': 'ISC Amp-Hours', 'source_file': 'hyper_260101.log'}
+    with TestClient(main.app) as client:
+        r = client.post('/api/admin/import/maintenance-events', json={'rows': [row]})
+        assert r.status_code == 200
+        assert r.json() == {'inserted': 1}
+        client.post('/api/admin/import/maintenance-events', json={'rows': [row]})  # re-run
+    conn = get_conn(db_path)
+    count = conn.execute("SELECT COUNT(*) FROM maintenance_events").fetchone()[0]
+    conn.close()
+    assert count == 1  # upsert, not duplicated
+
+
+def test_import_predictions_inserts_and_upserts(db_path):
+    row = {'run_at': '2026-01-01T00:00:00Z', 'component': 'isc_amphrs', 'risk_score': 0.5,
+           'days_estimate': 30.0, 'alert_level': 'YELLOW', 'primary_signal': 'trend',
+           'top_features': '["a", "b"]'}
+    with TestClient(main.app) as client:
+        r = client.post('/api/admin/import/predictions', json={'rows': [row]})
+    assert r.status_code == 200
+    assert r.json() == {'inserted': 1}
+    conn = get_conn(db_path)
+    count = conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
+def test_import_events_inserts_and_deduplicates(db_path):
+    row = {'timestamp': '2026-01-01T00:00:00Z', 'severity': 'error', 'code': 'E1',
+           'function': 'foo', 'message': 'bad thing', 'source_file': 'hyper_260101.log'}
+    with TestClient(main.app) as client:
+        r1 = client.post('/api/admin/import/events', json={'rows': [row]})
+        client.post('/api/admin/import/events', json={'rows': [row]})  # exact duplicate
+    assert r1.status_code == 200
+    conn = get_conn(db_path)
+    count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.close()
+    assert count == 1  # UNIQUE constraint + INSERT OR IGNORE — no duplicate
+
+
 def test_import_gauge_readings_inserts_and_is_idempotent(db_path):
     row = {'lab_id': 'petlabs-pretoria', 'gauge_name': 'Vacuum-P', 'timestamp': '2026-01-01T00:00:00Z',
            'value': 1e-6, 'unit': 'mbar', 'is_alert': 0, 'alert_reason': '', 'photo_path': '',
