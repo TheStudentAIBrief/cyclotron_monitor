@@ -7,15 +7,16 @@ import {
   getMaintenance, getPredictions, getEvents,
   MaintenanceEvent, PredictionRecord, FaultEvent,
 } from '../../services/api';
+import { Colors } from '../../constants/Theme';
 
 type Tab = 'maintenance' | 'predictions' | 'events';
 type AnyRecord = MaintenanceEvent | PredictionRecord | FaultEvent;
 
 const LEVEL_COLOR: Record<string, string> = {
-  RED: '#ff6b6b',
-  ORANGE: '#ffb347',
-  YELLOW: '#ffe066',
-  GREEN: '#7aff7a',
+  RED: Colors.alertRed,
+  ORANGE: Colors.alertOrange,
+  YELLOW: Colors.alertYellow,
+  GREEN: Colors.alertGreen,
 };
 
 export default function RecordsScreen() {
@@ -91,7 +92,7 @@ export default function RecordsScreen() {
       <View style={styles.item}>
         <View style={styles.itemRow}>
           <Text style={styles.itemDate}>{item.timestamp.slice(0, 10)}</Text>
-          <Text style={[styles.itemTag, { color: item.severity === 'FAULT' ? '#ff6b6b' : '#ffb347' }]}>
+          <Text style={[styles.itemTag, { color: item.severity === 'FAULT' ? Colors.alertRed : Colors.alertOrange }]}>
             {item.severity} {item.code}
           </Text>
         </View>
@@ -156,7 +157,7 @@ export default function RecordsScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 50 }} size="large" color="#4a9eff" />
+        <ActivityIndicator style={{ marginTop: 50 }} size="large" color={Colors.primary} />
       ) : (
         <FlatList
           data={items}
@@ -168,7 +169,7 @@ export default function RecordsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => load(true)}
-              tintColor="#4a9eff"
+              tintColor={Colors.primary}
             />
           }
           ListEmptyComponent={
@@ -181,28 +182,28 @@ export default function RecordsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: Colors.ink },
 
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a5a',
+    borderBottomColor: Colors.borderDark,
   },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#4a9eff' },
+  tabActive: { borderBottomWidth: 2, borderBottomColor: Colors.primary },
   tabText: { color: '#555', fontSize: 13 },
-  tabTextActive: { color: '#4a9eff', fontWeight: '600' },
+  tabTextActive: { color: Colors.primary, fontWeight: '600' },
 
   searchRow: {
     flexDirection: 'row',
-    backgroundColor: '#0d0d1f',
+    backgroundColor: Colors.surfaceDarkAlt,
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a5a',
+    borderBottomColor: Colors.borderDark,
   },
   search: {
     flex: 1,
-    color: '#e0e0e0',
+    color: Colors.white,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 13,
@@ -211,15 +212,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     justifyContent: 'center',
   },
-  searchBtnText: { color: '#4a9eff', fontSize: 13, fontWeight: '600' },
+  searchBtnText: { color: Colors.primary, fontSize: 13, fontWeight: '600' },
 
   list: { padding: 14 },
   item: {
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 8,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
   },
   itemRow: {
     flexDirection: 'row',
@@ -229,9 +230,9 @@ const styles = StyleSheet.create({
   },
   itemDate: { color: '#555', fontSize: 12 },
   itemTag: { fontSize: 11, fontWeight: '700', color: '#888' },
-  itemTitle: { color: '#e0e0e0', fontSize: 14, fontWeight: '600' },
+  itemTitle: { color: Colors.white, fontSize: 14, fontWeight: '600' },
   itemSub: { color: '#888', fontSize: 12, marginTop: 3 },
 
-  error: { color: '#ff6b6b', textAlign: 'center', padding: 16 },
+  error: { color: Colors.alertRed, textAlign: 'center', padding: 16 },
   empty: { color: '#555', textAlign: 'center', marginTop: 50 },
 });

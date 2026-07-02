@@ -8,11 +8,12 @@ import {
   getDashboard, getPETraceDashboard, DashboardData, ComponentData,
 } from '../../services/api';
 import ComponentCard from '../../components/ComponentCard';
+import { Colors } from '../../constants/Theme';
 
 type ActiveView = null | 'main' | 'petrace';
 
 const LEVEL_COLOR: Record<string, string> = {
-  RED: '#e74c3c', ORANGE: '#e67e22', YELLOW: '#f39c12', GREEN: '#2ecc71',
+  RED: Colors.alertRed, ORANGE: Colors.alertOrange, YELLOW: Colors.alertYellow, GREEN: Colors.alertGreen,
 };
 const LEVELS = ['RED', 'ORANGE', 'YELLOW', 'GREEN'] as const;
 
@@ -26,7 +27,7 @@ function SelectorScreen({ onSelect }: { onSelect: (v: 'main' | 'petrace') => voi
 
       <TouchableOpacity style={sel.card} onPress={() => onSelect('main')} activeOpacity={0.8}>
         <View style={sel.iconWrap}>
-          <Ionicons name="pulse" size={32} color="#4a9eff" />
+          <Ionicons name="pulse" size={32} color={Colors.primary} />
         </View>
         <View style={sel.textWrap}>
           <Text style={sel.cardTitle}>IBA Cyclone 18/9</Text>
@@ -37,7 +38,7 @@ function SelectorScreen({ onSelect }: { onSelect: (v: 'main' | 'petrace') => voi
 
       <TouchableOpacity style={sel.card} onPress={() => onSelect('petrace')} activeOpacity={0.8}>
         <View style={sel.iconWrap}>
-          <Ionicons name="radio-outline" size={32} color="#cc88ff" />
+          <Ionicons name="radio-outline" size={32} color={Colors.accentPurple} />
         </View>
         <View style={sel.textWrap}>
           <Text style={sel.cardTitle}>PETrace 800</Text>
@@ -51,29 +52,29 @@ function SelectorScreen({ onSelect }: { onSelect: (v: 'main' | 'petrace') => voi
 
 const sel = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: '#1a1a2e',
+    flex: 1, backgroundColor: Colors.ink,
     padding: 20, justifyContent: 'center',
   },
   heading: {
-    color: '#e0e0e0', fontSize: 22, fontWeight: '700',
+    color: Colors.white, fontSize: 22, fontWeight: '700',
     textAlign: 'center', marginBottom: 6,
   },
   sub: {
     color: '#555', fontSize: 13, textAlign: 'center', marginBottom: 32,
   },
   card: {
-    backgroundColor: '#16213e',
-    borderWidth: 1, borderColor: '#2a2a5a',
+    backgroundColor: Colors.surfaceDark,
+    borderWidth: 1, borderColor: Colors.borderDark,
     borderRadius: 14, padding: 18, marginBottom: 16,
     flexDirection: 'row', alignItems: 'center', gap: 14,
   },
   iconWrap: {
     width: 52, height: 52, borderRadius: 12,
-    backgroundColor: '#0d0d1f',
+    backgroundColor: Colors.surfaceDarkAlt,
     alignItems: 'center', justifyContent: 'center',
   },
   textWrap: { flex: 1 },
-  cardTitle: { color: '#e0e0e0', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  cardTitle: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
   cardDesc:  { color: '#666', fontSize: 13, lineHeight: 18 },
 });
 
@@ -124,7 +125,7 @@ function DashboardView({
   if (loading) {
     return (
       <View style={dash.centered}>
-        <ActivityIndicator size="large" color="#4a9eff" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={dash.loadingText}>Loading predictions…</Text>
       </View>
     );
@@ -133,7 +134,7 @@ function DashboardView({
   return (
     <View style={dash.container}>
       <TouchableOpacity style={dash.backRow} onPress={onBack} activeOpacity={0.7}>
-        <Ionicons name="chevron-back" size={18} color="#4a9eff" />
+        <Ionicons name="chevron-back" size={18} color={Colors.primary} />
         <Text style={dash.backLabel}>All Cyclotrons</Text>
       </TouchableOpacity>
 
@@ -163,7 +164,7 @@ function DashboardView({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => load(true)}
-            tintColor="#4a9eff"
+            tintColor={Colors.primary}
           />
         }
         ListHeaderComponent={
@@ -199,9 +200,9 @@ function DashboardView({
 }
 
 const dash = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: Colors.ink },
   centered: {
-    flex: 1, backgroundColor: '#1a1a2e',
+    flex: 1, backgroundColor: Colors.ink,
     justifyContent: 'center', alignItems: 'center',
   },
   loadingText: { color: '#666', marginTop: 12, fontSize: 13 },
@@ -209,19 +210,19 @@ const dash = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4,
   },
-  backLabel: { color: '#4a9eff', fontSize: 14 },
+  backLabel: { color: Colors.primary, fontSize: 14 },
   titleRow: { paddingHorizontal: 16, paddingBottom: 8 },
-  title: { color: '#e0e0e0', fontSize: 18, fontWeight: '700' },
+  title: { color: Colors.white, fontSize: 18, fontWeight: '700' },
   subtitleText: { color: '#555', fontSize: 12, marginTop: 2 },
-  staleBanner: { backgroundColor: '#7a3500', paddingVertical: 8, paddingHorizontal: 16 },
-  staleText: { color: '#ffb347', fontSize: 12, textAlign: 'center' },
-  errorBanner: { backgroundColor: '#5a1515', paddingVertical: 8, paddingHorizontal: 16 },
-  errorText: { color: '#ff6b6b', fontSize: 12, textAlign: 'center' },
+  staleBanner: { backgroundColor: Colors.alertOrangeBg, paddingVertical: 8, paddingHorizontal: 16 },
+  staleText: { color: Colors.alertOrange, fontSize: 12, textAlign: 'center' },
+  errorBanner: { backgroundColor: Colors.alertRedBg, paddingVertical: 8, paddingHorizontal: 16 },
+  errorText: { color: Colors.alertRed, fontSize: 12, textAlign: 'center' },
   list: { padding: 16, paddingTop: 4 },
   chips: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   chip: {
-    flex: 1, backgroundColor: '#16213e',
-    borderWidth: 1, borderColor: '#2a2a5a',
+    flex: 1, backgroundColor: Colors.surfaceDark,
+    borderWidth: 1, borderColor: Colors.borderDark,
     borderRadius: 10, paddingVertical: 10, alignItems: 'center',
   },
   chipNumber: { fontSize: 20, fontWeight: '800' },

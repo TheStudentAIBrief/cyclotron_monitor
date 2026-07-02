@@ -4,6 +4,7 @@ import {
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { askAI } from '../../services/api';
+import { Colors } from '../../constants/Theme';
 
 export default function AskAIScreen() {
   const [question, setQuestion] = useState('');
@@ -75,7 +76,7 @@ export default function AskAIScreen() {
             activeOpacity={0.8}
           >
             {loading
-              ? <ActivityIndicator color="#04122b" />
+              ? <ActivityIndicator color={Colors.white} />
               : <Text style={styles.buttonText}>Ask</Text>
             }
           </TouchableOpacity>
@@ -100,7 +101,7 @@ export default function AskAIScreen() {
 
         {loading && (
           <View style={styles.thinking}>
-            <ActivityIndicator size="small" color="#4a9eff" />
+            <ActivityIndicator size="small" color={Colors.primary} />
             <Text style={styles.thinkingText}>Thinking… up to ~5 min on CPU</Text>
           </View>
         )}
@@ -128,28 +129,28 @@ export default function AskAIScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: Colors.ink },
   scroll: { padding: 16, paddingBottom: 32 },
 
   card: {
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     borderLeftWidth: 4,
-    borderLeftColor: '#4a9eff',
+    borderLeftColor: Colors.primary,
     marginBottom: 16,
   },
-  cardTitle: { color: '#e0e0e0', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  cardSub: { color: '#6b7a99', fontSize: 12, marginBottom: 14 },
+  cardTitle: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  cardSub: { color: Colors.textMuted, fontSize: 12, marginBottom: 14 },
 
   input: {
-    backgroundColor: '#0d0d1f',
-    color: '#e0e0e0',
+    backgroundColor: Colors.surfaceDarkAlt,
+    color: Colors.white,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
@@ -158,52 +159,52 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   button: {
-    backgroundColor: '#4a9eff',
+    backgroundColor: Colors.primary,
     borderRadius: 8,
     paddingVertical: 13,
     alignItems: 'center',
   },
   buttonDisabled: { opacity: 0.45 },
-  buttonText: { color: '#04122b', fontSize: 15, fontWeight: '700' },
+  buttonText: { color: Colors.white, fontSize: 15, fontWeight: '700' },
 
   exampleHeader: { color: '#555', fontSize: 11, marginBottom: 8, textTransform: 'uppercase' },
   exampleChip: {
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     padding: 12,
     marginBottom: 8,
   },
-  exampleText: { color: '#aac4e8', fontSize: 13 },
+  exampleText: { color: Colors.textMutedBlue, fontSize: 13 },
 
   thinking: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
   thinkingText: { color: '#555', fontSize: 13 },
 
   errorCard: {
-    backgroundColor: '#3a0a0a',
+    backgroundColor: Colors.alertRedBg,
     borderRadius: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#7a1515',
+    borderColor: Colors.alertRedBorder,
     marginTop: 16,
   },
-  errorTitle: { color: '#ff6b6b', fontSize: 14, fontWeight: '700', marginBottom: 6 },
-  errorBody: { color: '#ffaaaa', fontSize: 13, marginBottom: 8 },
-  errorHint: { color: '#cc8888', fontSize: 12 },
-  code: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#ffaaaa' },
+  errorTitle: { color: Colors.alertRed, fontSize: 14, fontWeight: '700', marginBottom: 6 },
+  errorBody: { color: Colors.alertRedLight, fontSize: 13, marginBottom: 8 },
+  errorHint: { color: Colors.alertRedMuted, fontSize: 12 },
+  code: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: Colors.alertRedLight },
 
   answerCard: {
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     borderLeftWidth: 4,
-    borderLeftColor: '#4a9eff',
+    borderLeftColor: Colors.primary,
     marginTop: 16,
   },
-  answerTitle: { color: '#4a9eff', fontSize: 13, fontWeight: '700', marginBottom: 10 },
-  answerText: { color: '#e0e0e0', fontSize: 14, lineHeight: 22 },
+  answerTitle: { color: Colors.primary, fontSize: 13, fontWeight: '700', marginBottom: 10 },
+  answerText: { color: Colors.white, fontSize: 14, lineHeight: 22 },
   modelLabel: { color: '#444', fontSize: 11, marginTop: 12 },
 });

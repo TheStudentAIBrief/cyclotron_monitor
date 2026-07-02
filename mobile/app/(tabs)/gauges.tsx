@@ -8,6 +8,7 @@ import {
   submitGaugePhoto, submitManualGauge, getGauges, deleteGauge, GaugeReading,
 } from '../../services/api';
 import { gaugeStatus, STATUS_COLORS, GaugeStatus } from '../../utils/gaugeStatus';
+import { Colors } from '../../constants/Theme';
 
 export default function GaugesScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -166,7 +167,7 @@ export default function GaugesScreen() {
     <ScrollView
       style={styles.container}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4a9eff" />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
     >
       <View style={styles.section}>
 
@@ -178,7 +179,7 @@ export default function GaugesScreen() {
           activeOpacity={0.8}
         >
           {capturing
-            ? <ActivityIndicator color="#fff" />
+            ? <ActivityIndicator color={Colors.white} />
             : <Text style={styles.captureBtnText}>📷  Photograph Gauge</Text>
           }
         </TouchableOpacity>
@@ -237,8 +238,8 @@ export default function GaugesScreen() {
           <Switch
             value={isAlert}
             onValueChange={setIsAlert}
-            trackColor={{ false: '#2a2a5a', true: '#6b1d1d' }}
-            thumbColor={isAlert ? '#ff6b6b' : '#555'}
+            trackColor={{ false: Colors.borderDark, true: Colors.alertRedBg }}
+            thumbColor={isAlert ? Colors.alertRed : '#555'}
           />
         </View>
 
@@ -268,7 +269,7 @@ export default function GaugesScreen() {
           activeOpacity={0.8}
         >
           {saving
-            ? <ActivityIndicator color="#fff" />
+            ? <ActivityIndicator color={Colors.white} />
             : <Text style={styles.saveBtnText}>Save Reading</Text>
           }
         </TouchableOpacity>
@@ -295,7 +296,7 @@ export default function GaugesScreen() {
                       <Text style={[styles.statusPillText, { color: col.text }]}>{st}</Text>
                     </View>
                     {deletingId === item.id
-                      ? <ActivityIndicator size="small" color="#884444" style={styles.deleteSpinner} />
+                      ? <ActivityIndicator size="small" color={Colors.alertRed} style={styles.deleteSpinner} />
                       : (
                         <TouchableOpacity
                           onPress={() => handleDelete(item.id, item.gauge_name)}
@@ -335,44 +336,44 @@ export default function GaugesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: Colors.ink },
   section: { padding: 16 },
 
   captureBtn: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: Colors.primary,
     borderRadius: 10,
     paddingVertical: 18,
     alignItems: 'center',
     marginBottom: 14,
   },
-  captureBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  captureBtnText: { color: Colors.white, fontSize: 16, fontWeight: '600' },
 
   preview: {
     width: '100%',
     height: 200,
-    backgroundColor: '#0d0d1f',
+    backgroundColor: Colors.surfaceDarkAlt,
     borderRadius: 8,
     marginBottom: 12,
   },
 
   ocrBox: {
-    backgroundColor: '#0d1a2e',
+    backgroundColor: Colors.surfaceDarkBlue,
     borderRadius: 8,
     padding: 12,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#1e3a5f',
+    borderColor: Colors.borderBlue,
   },
-  ocrLabel: { color: '#4a9eff', fontSize: 10, fontWeight: '600', marginBottom: 5, textTransform: 'uppercase' },
+  ocrLabel: { color: Colors.primary, fontSize: 10, fontWeight: '600', marginBottom: 5, textTransform: 'uppercase' },
   ocrText: { color: '#aaa', fontSize: 13 },
 
   fieldLabel: { color: '#888', fontSize: 12, marginBottom: 5, marginTop: 12 },
   input: {
-    backgroundColor: '#0d0d1f',
-    color: '#e0e0e0',
+    backgroundColor: Colors.surfaceDarkAlt,
+    color: Colors.white,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 14,
@@ -389,17 +390,17 @@ const styles = StyleSheet.create({
   },
 
   msg: { fontSize: 13, textAlign: 'center', marginTop: 10, padding: 8, borderRadius: 6, overflow: 'hidden' },
-  msgOk: { backgroundColor: '#1d4d2e', color: '#7aff7a' },
-  msgErr: { backgroundColor: '#3a0a0a', color: '#ff6b6b' },
+  msgOk: { backgroundColor: Colors.alertGreenBg, color: Colors.alertGreen },
+  msgErr: { backgroundColor: Colors.alertRedBg, color: Colors.alertRed },
 
   saveBtn: {
-    backgroundColor: '#1d6b3e',
+    backgroundColor: Colors.alertGreen,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 14,
   },
-  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  saveBtnText: { color: Colors.white, fontSize: 15, fontWeight: '600' },
 
   history: { padding: 16, paddingTop: 4 },
   historyTitle: {
@@ -411,12 +412,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   histItem: {
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
   },
   histHeader: {
     flexDirection: 'row',
@@ -429,12 +430,12 @@ const styles = StyleSheet.create({
   statusPillText: { fontSize: 10, fontWeight: '700' },
   histHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   deleteBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  deleteBtnText: { color: '#884444', fontSize: 16, fontWeight: '700', lineHeight: 18 },
+  deleteBtnText: { color: Colors.alertRed, fontSize: 16, fontWeight: '700', lineHeight: 18 },
   deleteSpinner: { width: 20 },
-  histLocation: { color: '#6b7a99', fontSize: 12, marginBottom: 3 },
-  histValue: { color: '#e0e0e0', fontSize: 18, fontWeight: '700', marginBottom: 3 },
+  histLocation: { color: Colors.textMuted, fontSize: 12, marginBottom: 3 },
+  histValue: { color: Colors.white, fontSize: 18, fontWeight: '700', marginBottom: 3 },
   histTs: { color: '#555', fontSize: 11 },
-  histReason: { color: '#ffb347', fontSize: 12, marginTop: 4 },
+  histReason: { color: Colors.alertOrange, fontSize: 12, marginTop: 4 },
   empty: { color: '#555', textAlign: 'center', marginTop: 20 },
-  loadErr: { color: '#ff6b6b', textAlign: 'center', marginTop: 20, fontSize: 12, paddingHorizontal: 8 },
+  loadErr: { color: Colors.alertRed, textAlign: 'center', marginTop: 20, fontSize: 12, paddingHorizontal: 8 },
 });

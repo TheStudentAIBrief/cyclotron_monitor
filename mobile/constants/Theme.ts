@@ -13,6 +13,26 @@ export const Colors = {
   alertOrange: '#E8862E',
   alertYellow: '#E8C22E',
   alertGreen: '#2E9E6B',
+
+  // Dark-mode chrome tokens — screens under app/ keep a dark shell; these consolidate
+  // the previously-inline hex used for that chrome (Task 8).
+  tabInactive: '#8A8A9A',
+  surfaceDark: '#16213E',
+  surfaceDarkAlt: '#0D0D1F',
+  surfaceDarkBlue: '#0D1A2E',
+  borderDark: '#2A2A5A',
+  borderBlue: '#1E3A5F',
+  textMuted: '#6B7A99',
+  textMutedBlue: '#AAC4E8',
+  accentPurple: '#CC88FF',
+
+  // Alert-state background/border/text variants used by banners, cards and chips.
+  alertRedBg: '#3A0A0A',
+  alertRedBorder: '#7A1515',
+  alertRedLight: '#FFAAAA',
+  alertRedMuted: '#CC8888',
+  alertGreenBg: '#1D4D2E',
+  alertOrangeBg: '#7A3500',
 };
 
 export const Theme = {
