@@ -10,9 +10,8 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.staticfiles import StaticFiles
 
 from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
 from api.config import get_config
@@ -101,8 +100,42 @@ app.include_router(scan.router, prefix='')
 
 # Serve the Expo web export (the installable PWA) from the same Render deployment.
 # Built by `npm run build:web` in mobile/ (output is gitignored, not present until
-# built) — mounted last, and only if present, so its catch-all "/" doesn't shadow
-# the API routes above and doesn't break environments that never ran the build.
+# built) — registered last, and only if present, so its catch-all "/{full_path}"
+# doesn't shadow the API routes above (they're matched first, in registration order)
+# and doesn't break environments that never ran the build.
 _WEB_BUILD_DIR = Path(__file__).parent.parent / 'mobile' / 'dist'
 if _WEB_BUILD_DIR.is_dir():
-    app.mount('/', StaticFiles(directory=_WEB_BUILD_DIR, html=True), name='web')
+    _WEB_BUILD_DIR_RESOLVED = _WEB_BUILD_DIR.resolve()
+
+    @app.get('/{full_path:path}')
+    async def serve_web(full_path: str):
+        # docs/openapi are intentionally disabled above (docs_url=None etc.) — FastAPI
+        # then has no route for these, so without this guard they'd fall through to
+        # the catch-all below and get served the app shell with a 200 instead of a 404,
+        # defeating the "don't let anyone enumerate routes/models" hardening.
+        if full_path in ('openapi.json', 'docs', 'redoc'):
+            raise HTTPException(status_code=404)
+
+        # Expo's static web export ("output": "static") emits one <route>.html file
+        # per screen (e.g. gauges.html, records.html) rather than a single index.html
+        # SPA shell. StaticFiles(html=True) only serves index.html for directory URLs,
+        # so a fresh page load / browser refresh at a client route like /gauges 404s.
+        # Resolve extensionless route paths to their generated <route>.html here, and
+        # fall back to index.html for anything else (client-side router then decides,
+        # e.g. rendering the not-found screen).
+        candidate = (_WEB_BUILD_DIR / full_path).resolve()
+        if candidate != _WEB_BUILD_DIR_RESOLVED and _WEB_BUILD_DIR_RESOLVED not in candidate.parents:
+            # Path traversal attempt (e.g. "../../etc/passwd") — refuse, don't serve app shell.
+            raise HTTPException(status_code=404)
+
+        if candidate.is_file():
+            return FileResponse(candidate)
+
+        html_candidate = _WEB_BUILD_DIR / f'{full_path}.html'
+        if html_candidate.is_file():
+            return FileResponse(html_candidate)
+
+        index = _WEB_BUILD_DIR / 'index.html'
+        if index.is_file():
+            return FileResponse(index)
+        raise HTTPException(status_code=404)

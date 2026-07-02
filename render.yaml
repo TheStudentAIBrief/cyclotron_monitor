@@ -2,8 +2,12 @@ services:
   - type: web
     name: petlab-api
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    # Also builds the Expo web export (mobile/dist) so api/main.py has something to
+    # serve at "/" — mobile/dist is gitignored (build output), so without this step
+    # Render would only ever run the bare JSON API and never serve the PWA.
+    buildCommand: pip install -r requirements.txt && cd mobile && npm ci && npm run build:web
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: API_SECRET_KEY
         generateValue: true
