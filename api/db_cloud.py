@@ -110,6 +110,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
     actor  TEXT,
     detail TEXT
 );
+
+-- JWT revocation list. A token's jti lands here on explicit logout, letting
+-- get_current_user()/get_refresh_payload() reject it immediately instead of
+-- trusting it until its natural expiry (up to 7 days for a refresh token).
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    jti        TEXT PRIMARY KEY,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT NOT NULL
+);
 """
 
 

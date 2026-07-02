@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import secrets
+import sqlite3
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,7 +29,7 @@ if not _SECRET:
     _SECRET = secrets.token_hex(32)
 _ALGORITHM = 'HS256'
 _ACCESS_EXPIRE = timedelta(hours=1)
-_REFRESH_EXPIRE = timedelta(days=30)
+_REFRESH_EXPIRE = timedelta(days=7)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/auth/login')
 
@@ -48,11 +50,18 @@ def _verify_password(password: str, hash_b64: str) -> bool:
     return hmac.compare_digest(candidate, dk)
 
 
+# Fixed dummy hash in the same salt[32]+dk[32] base64 format _verify_password expects,
+# used to run the same PBKDF2 work on a missing-credentials-file/unknown-username path
+# as on a wrong-password-for-a-real-username path — see authenticate() below.
+_DUMMY_HASH = base64.b64encode(secrets.token_bytes(64)).decode('ascii')
+
+
 def authenticate(username: str, password: str) -> bool:
     creds = _load_creds()
-    if not creds:
-        return False
-    if creds.get('username') != username:
+    if not creds or creds.get('username') != username:
+        # Constant-time dummy verify (same 600k-iteration PBKDF2 cost as the real
+        # path) to prevent username enumeration via response-time differences.
+        _verify_password(password, _DUMMY_HASH)
         return False
     return _verify_password(password, creds['hash'])
 
@@ -123,23 +132,68 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
 def create_tokens(username: str, lab_id: str) -> dict:
     now = datetime.now(timezone.utc)
     access = jwt.encode(
-        {'sub': username, 'lab_id': lab_id, 'exp': now + _ACCESS_EXPIRE, 'type': 'access'},
+        {'sub': username, 'lab_id': lab_id, 'exp': now + _ACCESS_EXPIRE, 'type': 'access',
+         'jti': uuid.uuid4().hex},
         _SECRET, algorithm=_ALGORITHM,
     )
     refresh = jwt.encode(
-        {'sub': username, 'lab_id': lab_id, 'exp': now + _REFRESH_EXPIRE, 'type': 'refresh'},
+        {'sub': username, 'lab_id': lab_id, 'exp': now + _REFRESH_EXPIRE, 'type': 'refresh',
+         'jti': uuid.uuid4().hex},
         _SECRET, algorithm=_ALGORITHM,
     )
     return {'access_token': access, 'refresh_token': refresh, 'token_type': 'bearer'}
 
 
+def _is_revoked(jti: str | None) -> bool:
+    if not jti:
+        return False
+    cfg = get_config()
+    conn = sqlite3.connect(cfg['db_path'], timeout=30)
+    try:
+        row = conn.execute('SELECT 1 FROM revoked_tokens WHERE jti = ?', [jti]).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def revoke_token(payload: dict) -> None:
+    """Add a decoded token's jti to the revocation list so get_current_user()/
+    get_refresh_payload() reject it immediately, instead of trusting it until
+    its natural expiry (up to 7 days for a refresh token)."""
+    jti = payload.get('jti')
+    if not jti:
+        return
+    cfg = get_config()
+    now = datetime.now(timezone.utc)
+    exp_claim = payload.get('exp')
+    expires_at = (
+        datetime.fromtimestamp(exp_claim, tz=timezone.utc) if exp_claim else now
+    )
+    conn = sqlite3.connect(cfg['db_path'], timeout=30)
+    try:
+        conn.execute(
+            'INSERT OR REPLACE INTO revoked_tokens (jti, expires_at, revoked_at) VALUES (?,?,?)',
+            [jti, expires_at.isoformat(), now.isoformat()],
+        )
+        # Opportunistic cleanup so the table doesn't grow forever — a token past
+        # its own expiry is already rejected by jwt.decode(), so its revocation
+        # entry is no longer doing any work.
+        conn.execute('DELETE FROM revoked_tokens WHERE expires_at < ?', [now.isoformat()])
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _decode(token: str) -> dict:
     try:
-        return jwt.decode(token, _SECRET, algorithms=[_ALGORITHM])
+        payload = jwt.decode(token, _SECRET, algorithms=[_ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail='Token expired')
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail='Invalid token')
+    if _is_revoked(payload.get('jti')):
+        raise HTTPException(status_code=401, detail='Token has been revoked')
+    return payload
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:

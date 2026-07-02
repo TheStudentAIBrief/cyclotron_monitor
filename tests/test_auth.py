@@ -1,7 +1,8 @@
 """Auth-layer security tests (added during security hardening).
 
 Covers the JWT signing-key handling: tokens round-trip, the process key is never
-the old public default, and a token forged with that default is rejected.
+the old public default, and a token forged with that default is rejected. Also
+covers jti-based revocation (POST /auth/logout support).
 """
 import json
 
@@ -12,7 +13,24 @@ from fastapi import HTTPException
 from api import auth
 
 
-def test_access_token_roundtrips():
+@pytest.fixture
+def cloud_db(tmp_path, monkeypatch):
+    """_decode() checks revocation status against get_config()['db_path'], so
+    any test that decodes a token needs a real DB with revoked_tokens present."""
+    from api import config as _config
+    from api.db_cloud import init_cloud_tables
+
+    db_path = str(tmp_path / 'petlab.db')
+    init_cloud_tables(db_path)
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    _config.get_config.cache_clear()
+    try:
+        yield db_path
+    finally:
+        _config.get_config.cache_clear()
+
+
+def test_access_token_roundtrips(cloud_db):
     toks = auth.create_tokens('alice', 'lab1')
     payload = auth._decode(toks['access_token'])
     assert payload['sub'] == 'alice'
@@ -20,13 +38,36 @@ def test_access_token_roundtrips():
     assert payload['type'] == 'access'
 
 
-def test_refresh_token_type_is_enforced():
+def test_refresh_token_type_is_enforced(cloud_db):
     toks = auth.create_tokens('alice', 'lab1')
     # an access token must not be usable where a refresh token is required
     access_payload = auth._decode(toks['access_token'])
     assert access_payload['type'] == 'access'
     refresh_payload = auth._decode(toks['refresh_token'])
     assert refresh_payload['type'] == 'refresh'
+
+
+def test_revoked_token_is_rejected(cloud_db):
+    toks = auth.create_tokens('alice', 'lab1')
+    payload = auth._decode(toks['access_token'])
+    auth.revoke_token(payload)
+    with pytest.raises(HTTPException):
+        auth._decode(toks['access_token'])
+
+
+def test_revoking_one_token_does_not_affect_another(cloud_db):
+    toks_a = auth.create_tokens('alice', 'lab1')
+    toks_b = auth.create_tokens('alice', 'lab1')
+    auth.revoke_token(auth._decode(toks_a['access_token']))
+    with pytest.raises(HTTPException):
+        auth._decode(toks_a['access_token'])
+    # a second, independently-issued token for the same user is unaffected
+    assert auth._decode(toks_b['access_token'])['sub'] == 'alice'
+
+
+def test_revoke_token_without_jti_is_a_no_op(cloud_db):
+    # tokens minted before this feature existed have no 'jti' claim
+    auth.revoke_token({'sub': 'alice', 'exp': 9999999999})  # must not raise
 
 
 def test_signing_key_is_not_the_old_public_default():

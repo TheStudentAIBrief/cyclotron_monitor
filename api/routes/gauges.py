@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -23,6 +24,16 @@ from monitor.gauge_archive import archive_import
 
 router = APIRouter()
 _log = logging.getLogger('cyclotron.gauges')
+
+# Defense in depth: gemini_ocr.call() now sends GEMINI_API_KEY via a header, not the
+# URL, so a real key should never reach an exception string here. Redact any `key=...`
+# query fragment anyway before an upstream error message is returned to the client,
+# logged, or persisted into gauge_readings.raw_ocr_text below.
+_KEY_PARAM_RE = re.compile(r'([?&]key=)[^&\s\'"]+')
+
+
+def _redact(msg: str) -> str:
+    return _KEY_PARAM_RE.sub(r'\1***REDACTED***', msg)
 
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 # Ollama is opt-in (on-prem installs). Cloud uses Gemini. Empty default means an
@@ -142,7 +153,7 @@ def _gemini_then_ollama(
         try:
             return gemini_ocr.call(prompt, image_b64, schema, timeout=gemini_timeout), None
         except Exception as e:
-            gemini_err = f'{e.__class__.__name__}: {e}'
+            gemini_err = _redact(f'{e.__class__.__name__}: {e}')
             # fall through to Ollama
 
     ensure_running()
@@ -182,7 +193,7 @@ def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
                 raw = gemini_ocr.call(prompt, photo_b64, _OCR_SCHEMA, timeout=60)
                 return _parse_ocr_result(json.loads(raw))
             except Exception as e:
-                gemini_err = f'{e.__class__.__name__}: {e}'
+                gemini_err = _redact(f'{e.__class__.__name__}: {e}')
                 return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
                         'raw_ocr_text': f'Gemini failed ({gemini_err}); Ollama not configured.', 'ocr_ok': False}
         return {'value': None, 'unit': '', 'is_alert': False, 'alert_reason': '',
@@ -259,6 +270,21 @@ def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_us
         conn.close()
 
 
+def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
+    """Most recent non-null threshold set recorded for this gauge (from a prior
+    CSV/EUR import), or all-None if this gauge has never had thresholds on file."""
+    row = conn.execute(
+        "SELECT alert_lo, alert_hi, action_lo, action_hi FROM gauge_readings "
+        "WHERE lab_id=? AND gauge_name=? AND "
+        "(alert_lo IS NOT NULL OR alert_hi IS NOT NULL OR action_lo IS NOT NULL OR action_hi IS NOT NULL) "
+        "ORDER BY timestamp DESC LIMIT 1",
+        [lab_id, gauge_name],
+    ).fetchone()
+    if row is None:
+        return None, None, None, None
+    return row['alert_lo'], row['alert_hi'], row['action_lo'], row['action_hi']
+
+
 @router.post('/gauges')
 def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_current_user)):
     """Submit a gauge reading entered manually (no photo required)."""
@@ -270,13 +296,29 @@ def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_cu
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
     conn = get_conn(cfg['db_path'])
     try:
+        alert_lo, alert_hi, action_lo, action_hi = _latest_known_thresholds(conn, lab_id, req.gauge_name)
+        if alert_lo is None and alert_hi is None and action_lo is None and action_hi is None:
+            # No threshold history for this gauge yet — nothing to check the client's
+            # claim against, so trust it as before (matches pre-existing behaviour).
+            is_alert, alert_reason = int(req.is_alert), req.alert_reason
+        else:
+            # Thresholds are on file for this gauge — compute status server-side and
+            # ignore the client-supplied is_alert/alert_reason entirely, so a client
+            # can no longer submit is_alert=false to suppress a real alert condition.
+            status = _gauge_status(req.value, alert_lo, alert_hi, action_lo, action_hi)
+            is_alert, alert_reason = (1 if status in ('ALERT', 'ACTION') else 0), status
         cur = conn.execute(
-            "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason) "
-            "VALUES (?,?,?,?,?,?,?)",
-            [lab_id, req.gauge_name, ts, req.value, req.unit, int(req.is_alert), req.alert_reason],
+            "INSERT INTO gauge_readings "
+            "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, "
+            "alert_lo, alert_hi, action_lo, action_hi) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [lab_id, req.gauge_name, ts, req.value, req.unit, is_alert, alert_reason,
+             alert_lo, alert_hi, action_lo, action_hi],
         )
         conn.commit()
-        return {'id': cur.lastrowid, 'timestamp': ts, **req.model_dump()}
+        return {'id': cur.lastrowid, 'timestamp': ts, 'gauge_name': req.gauge_name,
+                'value': req.value, 'unit': req.unit, 'is_alert': bool(is_alert),
+                'alert_reason': alert_reason}
     finally:
         conn.close()
 
