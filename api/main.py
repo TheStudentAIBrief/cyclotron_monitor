@@ -19,7 +19,7 @@ from api.auth import (
 )
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
-from api.routes import ask, dashboard, gauges, petrace, push, records, scan, sync
+from api.routes import admin_import, ask, dashboard, gauges, petrace, push, records, scan, sync
 
 
 @asynccontextmanager
@@ -97,6 +97,7 @@ app.include_router(records.router,   prefix='/api', dependencies=_auth)
 app.include_router(push.router,      prefix='/api', dependencies=_auth)
 app.include_router(ask.router,       prefix='/api', dependencies=_auth)
 app.include_router(petrace.router,   prefix='/api', dependencies=_auth)
+app.include_router(admin_import.router, prefix='/api', dependencies=_auth)
 
 # Sync endpoint is protected by X-Sync-Key header (not JWT) — server-to-server only.
 app.include_router(sync.router, prefix='')
