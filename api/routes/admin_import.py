@@ -86,10 +86,10 @@ class PredictionImport(BaseModel):
 
 class EventRow(BaseModel):
     timestamp: str
-    severity: str = ''
-    code: str = ''
-    function: str = ''
-    message: str = ''
+    severity: str | None = ''
+    code: str | None = ''
+    function: str | None = ''
+    message: str | None = ''
     source_file: str | None = None
 
 

@@ -133,6 +133,19 @@ def test_import_predictions_inserts_and_upserts(db_path):
     assert count == 1
 
 
+def test_import_events_accepts_null_code(db_path):
+    # Regression: real local events data has 1230/1414 error/note-severity rows
+    # with code=NULL - the Pydantic model required a plain str, which 422'd
+    # the whole batch during the real migration run (same class of bug as the
+    # petrace_batches avg_vacuum_P=NULL fix above).
+    row = {'timestamp': '2026-01-01T00:00:00Z', 'severity': None, 'code': None,
+           'function': None, 'message': None, 'source_file': None}
+    with TestClient(main.app) as client:
+        r = client.post('/api/admin/import/events', json={'rows': [row]})
+    assert r.status_code == 200
+    assert r.json() == {'inserted': 1}
+
+
 def test_import_events_inserts_and_deduplicates(db_path):
     row = {'timestamp': '2026-01-01T00:00:00Z', 'severity': 'error', 'code': 'E1',
            'function': 'foo', 'message': 'bad thing', 'source_file': 'hyper_260101.log'}
