@@ -189,8 +189,17 @@ def _run_ocr(photo_b64: str, gauge_name: str = '') -> dict:
                 'raw_ocr_text': 'OCR not configured — set GEMINI_API_KEY or GAUGE_OLLAMA_MODEL', 'ocr_ok': False}
 
     try:
+        # num_ctx must cover prompt + image tokens. Ollama's per-model default (4096)
+        # is enough for the tiny synthetic images used in unit tests but not for a
+        # real phone photo — Qwen2.5-VL's dynamic-resolution tokenizer alone can spend
+        # 4000+ tokens on a full-size image, overflowing the default context window
+        # with a 400 "exceeds the available context size" error before the prompt
+        # text is even counted. qwen2.5vl:7b supports up to 128k context (see `ollama
+        # list`), so 8192 leaves generous headroom without materially slowing local
+        # inference.
         raw, gemini_err = _gemini_then_ollama(
             prompt, photo_b64, _OCR_SCHEMA, gemini_timeout=60, ollama_timeout=600,
+            ollama_options={'temperature': 0, 'num_ctx': 8192},
         )
         result = _parse_ocr_result(json.loads(raw))
         if gemini_err:

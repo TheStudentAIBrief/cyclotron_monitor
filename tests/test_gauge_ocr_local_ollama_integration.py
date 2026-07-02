@@ -96,3 +96,58 @@ def test_local_ollama_vision_fallback_reads_real_endpoint(monkeypatch):
     assert 'not configured' not in body['raw_ocr_text']
 
     print(f'\n[test_local_ollama_vision_fallback_reads_real_endpoint] real Ollama round-trip took {elapsed:.2f}s')
+
+
+def _full_size_test_image_b64() -> str:
+    """A phone-camera-sized image (3024x4032, matches a typical iPhone photo).
+
+    Regression fixture for the num_ctx bug: Qwen2.5-VL's dynamic-resolution image
+    tokenizer alone can spend 4000+ tokens on a full-size photo, which overflowed
+    Ollama's per-request default context window (4096) with a 400 "exceeds the
+    available context size" error — before num_ctx was set explicitly in
+    api/routes/gauges.py's _run_ocr. The tiny 200x200 image used above doesn't
+    reproduce this; only a realistically large image does.
+    """
+    from PIL import Image, ImageDraw
+
+    img = Image.new('RGB', (3024, 4032), 'white')
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((900, 1500, 2100, 2700), outline='black', width=12)
+    draw.line((1500, 2100, 1500, 1600), fill='black', width=12)
+    buf = __import__('io').BytesIO()
+    img.save(buf, format='JPEG', quality=90)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_local_ollama_vision_fallback_handles_full_size_photo_without_context_overflow(monkeypatch):
+    """Regression test for the num_ctx fix in api/routes/gauges.py's _run_ocr.
+
+    Before the fix, this request failed with a 400 "exceeds the available context
+    size (4096 tokens)" error from Ollama's llama.cpp backend, reported as
+    ocr_ok=False with 'OCR failed' in raw_ocr_text — never reaching the model.
+    """
+    from api import config as _config
+    _config.get_config.cache_clear()
+    import api.main as main
+    from api.auth import get_current_user
+    from api.routes import gauges
+    from api import gemini_ocr
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(gemini_ocr, 'is_configured', lambda: False)
+    monkeypatch.setattr(gauges, '_OLLAMA_MODEL', _REQUIRED_MODEL)
+
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+
+    photo_b64 = _full_size_test_image_b64()
+
+    with TestClient(main.app) as c:
+        r = c.post('/api/gauges/reading', json={'photo_b64': photo_b64, 'gauge_name': 'TEST-FULLSIZE'})
+
+    assert r.status_code == 200
+    body = r.json()
+    # The specific failure mode this regression guards against: a context-size
+    # rejection reported through raw_ocr_text (the endpoint always returns 200,
+    # even on OCR failure — see process_photo_reading's "no phantom NULL row" path).
+    assert 'exceeds the available context size' not in body['raw_ocr_text']
+    assert 'exceed_context_size_error' not in body['raw_ocr_text']
