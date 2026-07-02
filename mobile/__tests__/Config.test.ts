@@ -53,6 +53,36 @@ test('API_URL: falls back to localhost when EXPO_PUBLIC_API_URL is unset', () =>
   expect(loadConfig().API_URL).toBe('http://localhost:8000');
 });
 
+describe('API_URL: platform-aware fallback (same-origin deploy)', () => {
+  beforeEach(() => {
+    jest.resetModules();
+  });
+
+  test('web + no EXPO_PUBLIC_API_URL: resolves to "" (relative/same-origin fetch)', () => {
+    delete process.env.EXPO_PUBLIC_API_URL;
+    jest.doMock('react-native', () => ({ Platform: { OS: 'web' } }));
+    expect(loadConfig().API_URL).toBe('');
+  });
+
+  test('web + explicit EXPO_PUBLIC_API_URL: explicit value wins', () => {
+    process.env.EXPO_PUBLIC_API_URL = 'http://192.168.1.50:8000';
+    jest.doMock('react-native', () => ({ Platform: { OS: 'web' } }));
+    expect(loadConfig().API_URL).toBe('http://192.168.1.50:8000');
+  });
+
+  test('native (ios) + no EXPO_PUBLIC_API_URL: still falls back to localhost', () => {
+    delete process.env.EXPO_PUBLIC_API_URL;
+    jest.doMock('react-native', () => ({ Platform: { OS: 'ios' } }));
+    expect(loadConfig().API_URL).toBe('http://localhost:8000');
+  });
+
+  test('native (ios) + explicit EXPO_PUBLIC_API_URL: explicit value wins', () => {
+    process.env.EXPO_PUBLIC_API_URL = 'http://172.20.10.2:8000';
+    jest.doMock('react-native', () => ({ Platform: { OS: 'ios' } }));
+    expect(loadConfig().API_URL).toBe('http://172.20.10.2:8000');
+  });
+});
+
 // ── API_TIMEOUT_MS ───────────────────────────────────────────────────────────
 
 test('API_TIMEOUT_MS: defaults to 30000 — wide enough for WiFi cold-start', () => {
