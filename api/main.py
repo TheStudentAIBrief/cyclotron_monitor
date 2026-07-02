@@ -6,11 +6,13 @@ Production: uvicorn api.main:app --host 0.0.0.0 --port 8000
 """
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 
 from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
 from api.config import get_config
@@ -96,3 +98,11 @@ app.include_router(sync.router, prefix='')
 # Scan endpoint is deliberately unauthenticated (no JWT) — QR-code scanners have no
 # way to log in first.
 app.include_router(scan.router, prefix='')
+
+# Serve the Expo web export (the installable PWA) from the same Render deployment.
+# Built by `npm run build:web` in mobile/ (output is gitignored, not present until
+# built) — mounted last, and only if present, so its catch-all "/" doesn't shadow
+# the API routes above and doesn't break environments that never ran the build.
+_WEB_BUILD_DIR = Path(__file__).parent.parent / 'mobile' / 'dist'
+if _WEB_BUILD_DIR.is_dir():
+    app.mount('/', StaticFiles(directory=_WEB_BUILD_DIR, html=True), name='web')

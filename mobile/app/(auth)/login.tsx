@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { login } from '../../services/auth';
 import { useAuth } from '../../contexts/AuthContext';
+import { Colors } from '../../constants/Theme';
 
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
@@ -77,7 +78,7 @@ export default function LoginScreen() {
             activeOpacity={0.8}
           >
             {loading
-              ? <ActivityIndicator color="#fff" />
+              ? <ActivityIndicator color={Colors.white} />
               : <Text style={styles.buttonText}>Sign In</Text>
             }
           </TouchableOpacity>
@@ -88,19 +89,19 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { flex: 1, backgroundColor: Colors.ink },
   scroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   card: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: '#16213e',
+    backgroundColor: Colors.surfaceDark,
     borderRadius: 14,
     padding: 28,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
   },
   title: {
-    color: '#e0e0e0',
+    color: Colors.white,
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 4,
@@ -113,33 +114,33 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   error: {
-    color: '#ff6b6b',
+    color: Colors.alertRed,
     fontSize: 13,
     marginBottom: 14,
     textAlign: 'center',
-    backgroundColor: '#3a0a0a',
+    backgroundColor: Colors.alertRedBg,
     padding: 10,
     borderRadius: 6,
     overflow: 'hidden',
   },
   input: {
-    backgroundColor: '#0d0d1f',
-    color: '#e0e0e0',
+    backgroundColor: Colors.surfaceDarkAlt,
+    color: Colors.white,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2a2a5a',
+    borderColor: Colors.borderDark,
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontSize: 15,
     marginBottom: 12,
   },
   button: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: Colors.primary,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 6,
   },
   buttonDisabled: { opacity: 0.55 },
-  buttonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  buttonText: { color: Colors.white, fontSize: 15, fontWeight: '600' },
 });

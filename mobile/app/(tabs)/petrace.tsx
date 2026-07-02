@@ -3,13 +3,14 @@ import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import { getPETraceSummary, getPETraceBatches, PETraceSummary, PETraceBatch } from '../../services/api';
+import { Colors } from '../../constants/Theme';
 
 const TRACER_COLORS: Record<number, string> = {
-  1: '#4a9eff',
-  2: '#7aff7a',
-  3: '#ffb347',
-  4: '#ff6b6b',
-  5: '#cc88ff',
+  1: Colors.primary,
+  2: Colors.alertGreen,
+  3: Colors.alertOrange,
+  4: Colors.alertRed,
+  5: Colors.accentPurple,
 };
 
 function tracerColor(num: number) {
@@ -29,7 +30,7 @@ function fmtDuration(s: number) {
 
 function BeamBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min(value / max, 1) : 0;
-  const col = pct > 0.85 ? '#7aff7a' : pct > 0.6 ? '#ffb347' : '#ff6b6b';
+  const col = pct > 0.85 ? Colors.alertGreen : pct > 0.6 ? Colors.alertOrange : Colors.alertRed;
   return (
     <View style={barStyles.track}>
       <View style={[barStyles.fill, { width: `${pct * 100}%` as any, backgroundColor: col }]} />
@@ -38,7 +39,7 @@ function BeamBar({ value, max }: { value: number; max: number }) {
 }
 
 const barStyles = StyleSheet.create({
-  track: { height: 6, backgroundColor: '#2a2a5a', borderRadius: 3, overflow: 'hidden', flex: 1 },
+  track: { height: 6, backgroundColor: Colors.borderDark, borderRadius: 3, overflow: 'hidden', flex: 1 },
   fill:  { height: 6, borderRadius: 3 },
 });
 
@@ -78,7 +79,7 @@ export default function PETraceScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#4a9eff" size="large" />
+        <ActivityIndicator color={Colors.primary} size="large" />
         <Text style={styles.loadingText}>Loading PETrace data…</Text>
       </View>
     );
@@ -95,7 +96,7 @@ export default function PETraceScreen() {
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4a9eff" />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
     >
       {/* ── Summary cards ── */}
       <View style={styles.cardRow}>
@@ -112,7 +113,7 @@ export default function PETraceScreen() {
         </View>
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Foil #</Text>
-          <Text style={[styles.cardValue, { color: '#ffb347' }]}>{summary?.current_foil ?? '—'}</Text>
+          <Text style={[styles.cardValue, { color: Colors.alertOrange }]}>{summary?.current_foil ?? '—'}</Text>
         </View>
       </View>
 
@@ -133,7 +134,7 @@ export default function PETraceScreen() {
             <View key={i} style={styles.foilRow}>
               <Text style={styles.foilDate}>{fmtDate(fc.batch_date)}</Text>
               <Text style={styles.foilDetail}>
-                Foil {fc.old_foil} → <Text style={{ color: '#ffb347', fontWeight: '700' }}>Foil {fc.new_foil}</Text>
+                Foil {fc.old_foil} → <Text style={{ color: Colors.alertOrange, fontWeight: '700' }}>Foil {fc.new_foil}</Text>
                 {'  '}
                 <Text style={styles.foilBatch}>(batch #{fc.batch_no})</Text>
               </Text>
@@ -188,7 +189,7 @@ export default function PETraceScreen() {
               </View>
               <View style={styles.statCell}>
                 <Text style={styles.statLabel}>Foil</Text>
-                <Text style={[styles.statVal, { color: '#ffb347' }]}>{b.foil_no ?? '—'}</Text>
+                <Text style={[styles.statVal, { color: Colors.alertOrange }]}>{b.foil_no ?? '—'}</Text>
               </View>
             </View>
 
@@ -203,18 +204,18 @@ export default function PETraceScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
-  center: { flex: 1, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  container: { flex: 1, backgroundColor: Colors.ink },
+  center: { flex: 1, backgroundColor: Colors.ink, alignItems: 'center', justifyContent: 'center', padding: 20 },
   loadingText: { color: '#555', marginTop: 12 },
-  errorText: { color: '#ff6b6b', textAlign: 'center' },
+  errorText: { color: Colors.alertRed, textAlign: 'center' },
 
   cardRow: { flexDirection: 'row', padding: 12, gap: 8 },
   card: {
-    flex: 1, backgroundColor: '#16213e', borderRadius: 10, padding: 14,
-    borderWidth: 1, borderColor: '#2a2a5a',
+    flex: 1, backgroundColor: Colors.surfaceDark, borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: Colors.borderDark,
   },
   cardLabel: { color: '#555', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
-  cardValue: { color: '#e0e0e0', fontSize: 24, fontWeight: '700' },
+  cardValue: { color: Colors.white, fontSize: 24, fontWeight: '700' },
   cardMeta: { color: '#aaa', fontSize: 13, marginTop: 4 },
   cardSub: { color: '#888', fontSize: 10, marginTop: 2 },
 
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, marginTop: 6,
   },
 
-  foilRow: { backgroundColor: '#16213e', borderRadius: 8, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  foilRow: { backgroundColor: Colors.surfaceDark, borderRadius: 8, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 10 },
   foilDate: { color: '#888', fontSize: 12, minWidth: 80 },
   foilDetail: { color: '#ccc', fontSize: 13, flex: 1 },
   foilBatch: { color: '#555', fontSize: 11 },
@@ -235,12 +236,12 @@ const styles = StyleSheet.create({
   chartVal: { color: '#aaa', fontSize: 10, width: 28, textAlign: 'right' },
 
   batchCard: {
-    backgroundColor: '#16213e', borderRadius: 8, padding: 12,
-    marginBottom: 8, borderWidth: 1, borderColor: '#2a2a5a',
+    backgroundColor: Colors.surfaceDark, borderRadius: 8, padding: 12,
+    marginBottom: 8, borderWidth: 1, borderColor: Colors.borderDark,
   },
   batchHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   batchLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  batchNo: { color: '#4a9eff', fontSize: 13, fontWeight: '700', minWidth: 36 },
+  batchNo: { color: Colors.primary, fontSize: 13, fontWeight: '700', minWidth: 36 },
   tracerPill: {
     borderWidth: 1, borderRadius: 4,
     paddingHorizontal: 6, paddingVertical: 2,

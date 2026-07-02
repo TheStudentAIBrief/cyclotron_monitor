@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { logout } from '../../services/auth';
 import { useAuth } from '../../contexts/AuthContext';
+import { Colors } from '../../constants/Theme';
 
 export default function TabLayout() {
   const { setAuthed } = useAuth();
@@ -15,17 +16,17 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: '#1a1a2e' },
-        headerTintColor: '#e0e0e0',
+        headerStyle: { backgroundColor: Colors.primaryDark },
+        headerTintColor: Colors.white,
         headerTitleStyle: { fontWeight: '600' },
         headerRight: () => (
           <TouchableOpacity onPress={handleLogout} style={{ marginRight: 16 }}>
-            <Ionicons name="log-out-outline" size={22} color="#666" />
+            <Ionicons name="log-out-outline" size={22} color={Colors.surfaceAlt} />
           </TouchableOpacity>
         ),
-        tabBarStyle: { backgroundColor: '#0d0d1f', borderTopColor: '#2a2a4a' },
-        tabBarActiveTintColor: '#4a9eff',
-        tabBarInactiveTintColor: '#555',
+        tabBarStyle: { backgroundColor: Colors.ink, borderTopColor: Colors.primaryDark },
+        tabBarActiveTintColor: Colors.primary,
+        tabBarInactiveTintColor: Colors.tabInactive,
       }}
     >
       <Tabs.Screen

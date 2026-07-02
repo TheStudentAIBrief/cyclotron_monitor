@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SecureStore from 'expo-secure-store';
 import { AuthContext } from '../contexts/AuthContext';
+import { Colors } from '../constants/Theme';
 
 export default function RootLayout() {
   const [checking, setChecking] = useState(true);
@@ -51,7 +52,7 @@ export default function RootLayout() {
   if (checking) {
     return (
       <AuthContext.Provider value={{ setAuthed }}>
-        <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#1a1a2e' }}>
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.ink }}>
           <StatusBar style="light" />
         </GestureHandlerRootView>
       </AuthContext.Provider>

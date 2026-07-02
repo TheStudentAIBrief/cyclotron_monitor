@@ -59,7 +59,10 @@ def process_images(image_map: dict[str, bytes], token: str, gauge_name: str, api
                 f"{api}/api/gauges/reading",
                 headers=headers,
                 json={"photo_b64": b64, "gauge_name": gauge_name or pathlib.Path(name).stem},
-                timeout=120,
+                # Matches the server's own Ollama fallback budget (ollama_timeout=600
+                # in api/routes/gauges.py's _run_ocr) — real CPU-bound local vision
+                # inference on a full photo can take several minutes.
+                timeout=600,
             )
             r.raise_for_status()
             res = r.json()

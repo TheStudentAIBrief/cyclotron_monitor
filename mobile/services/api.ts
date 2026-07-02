@@ -1,5 +1,6 @@
 import { getAccessToken, refreshAccessToken, logout } from './auth';
 import Config from '../constants/Config';
+import { BeamTrendRow, GaugeHistoryRow } from '../utils/dashboardWidgets';
 
 // ─── Response types ──────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface ComponentData {
 export interface DashboardData {
   generated_at: string;
   components: ComponentData[];
+  beam_trend?: BeamTrendRow[];
+  gauge_history?: GaugeHistoryRow[];
 }
 
 export interface GaugeReading {
