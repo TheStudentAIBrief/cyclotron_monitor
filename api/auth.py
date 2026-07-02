@@ -70,14 +70,31 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
     setup_credentials.py's interactive prompt can't run. Never overwrites an
     existing credentials file, and does nothing if either env var is unset —
     a deploy without them configured just can't log in yet, it doesn't crash.
+
+    Set BOOTSTRAP_FORCE_RESET=true to delete an existing credentials file and
+    recreate it from the current BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD — the
+    only way to recover from a wrong/forgotten bootstrap password when there's
+    no shell access to just delete the file directly (e.g. free-tier Render).
+    Unset BOOTSTRAP_FORCE_RESET again after the next successful boot.
     """
     creds_path = Path(db_path).parent / '.credentials.json'
+    force_reset = os.environ.get('BOOTSTRAP_FORCE_RESET', '').strip().lower() in ('1', 'true', 'yes')
+
     if creds_path.exists():
-        logging.getLogger('uvicorn.error').info(
-            'Bootstrap credentials check: %s already exists — skipping (this is '
-            'expected on every boot after the first).', creds_path,
+        if not force_reset:
+            logging.getLogger('uvicorn.error').info(
+                'Bootstrap credentials check: %s already exists — skipping (this is '
+                'expected on every boot after the first). Set BOOTSTRAP_FORCE_RESET=true '
+                'to replace it if the login is wrong/forgotten.', creds_path,
+            )
+            return
+        logging.getLogger('uvicorn.error').warning(
+            'BOOTSTRAP_FORCE_RESET is set — deleting %s and recreating it from '
+            'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD. Unset BOOTSTRAP_FORCE_RESET '
+            'after this boot succeeds, or every future restart will do this again.',
+            creds_path,
         )
-        return
+        creds_path.unlink()
     username = os.environ.get('BOOTSTRAP_USERNAME', '').strip()
     password = os.environ.get('BOOTSTRAP_PASSWORD', '')
     if not username or not password:

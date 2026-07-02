@@ -62,8 +62,57 @@ def test_bootstrap_does_not_overwrite_existing_credentials(tmp_path, monkeypatch
     creds_path.write_text(json.dumps({'username': 'existing', 'hash': 'unchanged'}))
     monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
     monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    monkeypatch.delenv('BOOTSTRAP_FORCE_RESET', raising=False)
     auth.ensure_bootstrap_credentials(db_path)
     assert json.loads(creds_path.read_text()) == {'username': 'existing', 'hash': 'unchanged'}
+
+
+def test_bootstrap_force_reset_replaces_existing_credentials(tmp_path, monkeypatch):
+    # Covers the no-shell-access recovery path: a Render deploy already created
+    # data/.credentials.json (e.g. from an earlier/different BOOTSTRAP_PASSWORD
+    # value), and the only way to reset it without shell access is this flag.
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-new-strong-password-456')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+
+    auth.ensure_bootstrap_credentials(db_path)
+
+    creds = json.loads(creds_path.read_text())
+    assert creds['username'] == 'new-user'
+    assert auth._verify_password('a-new-strong-password-456', creds['hash'])
+
+
+def test_bootstrap_force_reset_logs_a_warning(tmp_path, monkeypatch, caplog):
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-new-strong-password-456')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+    with caplog.at_level('WARNING', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'BOOTSTRAP_FORCE_RESET' in caplog.text
+
+
+def test_bootstrap_force_reset_without_valid_new_credentials_still_deletes_but_does_not_recreate(
+    tmp_path, monkeypatch,
+):
+    # Edge case: force-reset is set but the new username/password are missing or
+    # too short - the stale file is still removed (so a corrected next boot can
+    # succeed) but nothing insecure gets written.
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'short')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+
+    auth.ensure_bootstrap_credentials(db_path)
+
+    assert not creds_path.exists()
 
 
 def test_bootstrap_does_nothing_when_env_vars_unset(tmp_path, monkeypatch):
