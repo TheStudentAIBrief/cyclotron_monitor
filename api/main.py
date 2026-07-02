@@ -10,20 +10,26 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.staticfiles import StaticFiles
 
-from api.auth import authenticate, create_tokens, get_current_user, get_refresh_payload
+from api.auth import (
+    authenticate, create_tokens, ensure_bootstrap_credentials, get_current_user,
+    get_refresh_payload,
+)
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
-from api.routes import ask, dashboard, gauges, petrace, push, records, scan, sync
+from api.routes import admin_import, ask, dashboard, gauges, petrace, push, records, scan, sync
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_config()
     init_cloud_tables(cfg['db_path'])
+    # No-op if data/.credentials.json already exists or BOOTSTRAP_USERNAME/
+    # BOOTSTRAP_PASSWORD aren't set — only matters on a fresh disk (new deploy)
+    # where setup_credentials.py's interactive prompt has no terminal to run in.
+    ensure_bootstrap_credentials(cfg['db_path'])
     yield
 
 
@@ -91,6 +97,7 @@ app.include_router(records.router,   prefix='/api', dependencies=_auth)
 app.include_router(push.router,      prefix='/api', dependencies=_auth)
 app.include_router(ask.router,       prefix='/api', dependencies=_auth)
 app.include_router(petrace.router,   prefix='/api', dependencies=_auth)
+app.include_router(admin_import.router, prefix='/api', dependencies=_auth)
 
 # Sync endpoint is protected by X-Sync-Key header (not JWT) — server-to-server only.
 app.include_router(sync.router, prefix='')
@@ -100,9 +107,45 @@ app.include_router(sync.router, prefix='')
 app.include_router(scan.router, prefix='')
 
 # Serve the Expo web export (the installable PWA) from the same Render deployment.
-# Built by `npm run build:web` in mobile/ (output is gitignored, not present until
-# built) — mounted last, and only if present, so its catch-all "/" doesn't shadow
-# the API routes above and doesn't break environments that never ran the build.
+# mobile/dist is committed to the repo (built locally with `npx expo export
+# --platform web`, not at deploy time — Render's Python runtime bundles an old
+# Node, too old for Expo SDK 54's tooling) — registered last, and only if present,
+# so its catch-all "/{full_path}" doesn't shadow the API routes above (they're
+# matched first, in registration order) and doesn't break environments where
+# mobile/dist hasn't been built/committed yet.
 _WEB_BUILD_DIR = Path(__file__).parent.parent / 'mobile' / 'dist'
 if _WEB_BUILD_DIR.is_dir():
-    app.mount('/', StaticFiles(directory=_WEB_BUILD_DIR, html=True), name='web')
+    _WEB_BUILD_DIR_RESOLVED = _WEB_BUILD_DIR.resolve()
+
+    @app.get('/{full_path:path}')
+    async def serve_web(full_path: str):
+        # docs/openapi are intentionally disabled above (docs_url=None etc.) — FastAPI
+        # then has no route for these, so without this guard they'd fall through to
+        # the catch-all below and get served the app shell with a 200 instead of a 404,
+        # defeating the "don't let anyone enumerate routes/models" hardening.
+        if full_path in ('openapi.json', 'docs', 'redoc'):
+            raise HTTPException(status_code=404)
+
+        # Expo's static web export ("output": "static") emits one <route>.html file
+        # per screen (e.g. gauges.html, records.html) rather than a single index.html
+        # SPA shell. StaticFiles(html=True) only serves index.html for directory URLs,
+        # so a fresh page load / browser refresh at a client route like /gauges 404s.
+        # Resolve extensionless route paths to their generated <route>.html here, and
+        # fall back to index.html for anything else (client-side router then decides,
+        # e.g. rendering the not-found screen).
+        candidate = (_WEB_BUILD_DIR / full_path).resolve()
+        if candidate != _WEB_BUILD_DIR_RESOLVED and _WEB_BUILD_DIR_RESOLVED not in candidate.parents:
+            # Path traversal attempt (e.g. "../../etc/passwd") — refuse, don't serve app shell.
+            raise HTTPException(status_code=404)
+
+        if candidate.is_file():
+            return FileResponse(candidate)
+
+        html_candidate = _WEB_BUILD_DIR / f'{full_path}.html'
+        if html_candidate.is_file():
+            return FileResponse(html_candidate)
+
+        index = _WEB_BUILD_DIR / 'index.html'
+        if index.is_file():
+            return FileResponse(index)
+        raise HTTPException(status_code=404)

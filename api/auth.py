@@ -57,6 +57,69 @@ def authenticate(username: str, password: str) -> bool:
     return _verify_password(password, creds['hash'])
 
 
+def _hash_password(password: str) -> str:
+    """Same PBKDF2-SHA256 format _verify_password expects (salt[:32] + dk)."""
+    salt = secrets.token_bytes(32)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 600_000)
+    return base64.b64encode(salt + dk).decode('ascii')
+
+
+def ensure_bootstrap_credentials(db_path: str) -> None:
+    """Create data/.credentials.json from BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD
+    env vars on first boot of a fresh deploy (e.g. a new Render disk), where
+    setup_credentials.py's interactive prompt can't run. Never overwrites an
+    existing credentials file, and does nothing if either env var is unset —
+    a deploy without them configured just can't log in yet, it doesn't crash.
+
+    Set BOOTSTRAP_FORCE_RESET=true to delete an existing credentials file and
+    recreate it from the current BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD — the
+    only way to recover from a wrong/forgotten bootstrap password when there's
+    no shell access to just delete the file directly (e.g. free-tier Render).
+    Unset BOOTSTRAP_FORCE_RESET again after the next successful boot.
+    """
+    creds_path = Path(db_path).parent / '.credentials.json'
+    force_reset = os.environ.get('BOOTSTRAP_FORCE_RESET', '').strip().lower() in ('1', 'true', 'yes')
+
+    if creds_path.exists():
+        if not force_reset:
+            logging.getLogger('uvicorn.error').info(
+                'Bootstrap credentials check: %s already exists — skipping (this is '
+                'expected on every boot after the first). Set BOOTSTRAP_FORCE_RESET=true '
+                'to replace it if the login is wrong/forgotten.', creds_path,
+            )
+            return
+        logging.getLogger('uvicorn.error').warning(
+            'BOOTSTRAP_FORCE_RESET is set — deleting %s and recreating it from '
+            'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD. Unset BOOTSTRAP_FORCE_RESET '
+            'after this boot succeeds, or every future restart will do this again.',
+            creds_path,
+        )
+        creds_path.unlink()
+    username = os.environ.get('BOOTSTRAP_USERNAME', '').strip()
+    password = os.environ.get('BOOTSTRAP_PASSWORD', '')
+    if not username or not password:
+        logging.getLogger('uvicorn.error').warning(
+            'No login exists yet (%s not found) and BOOTSTRAP_USERNAME/'
+            'BOOTSTRAP_PASSWORD are not both set — nobody can log in until '
+            'both are configured and the service restarts.', creds_path,
+        )
+        return
+    if len(password) < 12:
+        logging.getLogger('uvicorn.error').warning(
+            'BOOTSTRAP_PASSWORD is set but shorter than 12 characters — refusing '
+            'to create credentials. Set a longer BOOTSTRAP_PASSWORD and restart.'
+        )
+        return
+    creds_path.parent.mkdir(parents=True, exist_ok=True)
+    creds_path.write_text(
+        json.dumps({'username': username, 'hash': _hash_password(password)}),
+        encoding='utf-8',
+    )
+    logging.getLogger('uvicorn.error').info(
+        'Bootstrapped credentials for user %r at %s', username, creds_path,
+    )
+
+
 def create_tokens(username: str, lab_id: str) -> dict:
     now = datetime.now(timezone.utc)
     access = jwt.encode(

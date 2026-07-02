@@ -96,3 +96,39 @@ def test_dashboard_returns_empty_trend_fields_without_erroring_when_no_data(tmp_
     data = r.json()
     assert data['beam_trend'] == []
     assert data['gauge_history'] == []
+
+
+def test_dashboard_degrades_gracefully_with_real_data_when_never_synced(tmp_path, monkeypatch):
+    # Regression: a fresh cloud deploy (e.g. Render) that has beam_daily/
+    # gauge_readings data pushed directly via /api/admin/import/* but has
+    # never run the separate on-prem sync (monitor/cloud_sync.py -> POST
+    # /sync/dashboard) has NO synced_dashboard row at all - previously this
+    # made the whole endpoint 503, hiding real beam_trend/gauge_history data
+    # that already exists and is perfectly queryable.
+    db_path = str(tmp_path / "never_synced.db")
+    init_db(db_path)
+    init_cloud_tables(db_path)
+    # Deliberately do NOT seed synced_dashboard or a local dashboard.json.
+
+    conn = get_conn(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO beam_daily (date, param, mean, std, min, max, p10, p90, data_quality) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ['2026-06-30', 'Arc-I', 48.0, 1.0, 40.0, 55.0, 42.0, 53.0, 'ok'],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(dashboard, 'get_config', lambda: {'db_path': db_path, 'lab_id': _LAB_ID})
+
+    with TestClient(main.app) as client:
+        r = client.get('/api/dashboard')
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data['components'] == []
+    assert 'generated_at' in data
+    assert data['beam_trend']
+    assert data['beam_trend'][0]['param'] == 'Arc-I'

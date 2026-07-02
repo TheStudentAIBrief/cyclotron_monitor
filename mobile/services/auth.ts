@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from './secureStorage';
 import Config from '../constants/Config';
 
 const ACCESS_KEY = 'petlab_access_token';

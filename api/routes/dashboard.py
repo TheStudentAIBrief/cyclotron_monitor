@@ -1,6 +1,7 @@
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -85,10 +86,12 @@ def get_dashboard(user: dict = Depends(get_current_user)):
                     raise HTTPException(500, detail='Dashboard data temporarily unavailable')
 
     if payload is None:
-        raise HTTPException(
-            503,
-            detail='No dashboard data available. Run "python main.py predict" then sync to cloud.'
-        )
+        # No on-prem sync has ever run (monitor/cloud_sync.py -> POST
+        # /sync/dashboard) — component/alert data genuinely isn't available.
+        # Degrade gracefully rather than 503: beam_trend/gauge_history below
+        # are independently queryable and may have real data (e.g. pushed
+        # directly via /api/admin/import/*) even when this never happened.
+        payload = {'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'), 'components': []}
 
     payload['beam_trend'] = _beam_trend(db_path) if db_path else []
     payload['gauge_history'] = _gauge_history(db_path, lab_id) if db_path else []
