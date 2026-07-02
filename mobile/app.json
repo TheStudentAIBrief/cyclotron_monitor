@@ -49,6 +49,15 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "web": {
+      "name": "PetBMS",
+      "shortName": "PetBMS",
+      "bundler": "metro",
+      "output": "static",
+      "themeColor": "#1863DC",
+      "backgroundColor": "#0056A7",
+      "display": "standalone"
     }
   }
 }
