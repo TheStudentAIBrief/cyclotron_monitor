@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException, Response
 from fastapi.security import OAuth2PasswordBearer
 
 from api.config import get_config
@@ -32,6 +32,35 @@ _ACCESS_EXPIRE = timedelta(hours=1)
 _REFRESH_EXPIRE = timedelta(days=7)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/auth/login')
+
+# Web (PWA) refresh-token cookie: mirrors the JSON body's refresh_token into an
+# httpOnly cookie so mobile/services/auth.ts never needs to persist it in
+# localStorage on web (self-pentest finding: a stolen refresh token there gave
+# durable, replayable access with no OS-level protection). Native clients
+# ignore Set-Cookie entirely and keep using the JSON body via SecureStore --
+# this is purely additive, not a breaking change to the existing API contract.
+_REFRESH_COOKIE_NAME = 'refresh_token'
+_REFRESH_COOKIE_PATH = '/auth'
+# Local dev runs over plain http://localhost, where a Secure cookie would never
+# be stored/sent by the browser at all. Render (and any real deployment) is
+# always https, so default secure=True and only relax it when explicitly told.
+_COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'true').strip().lower() not in ('0', 'false', 'no')
+
+
+def set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=_REFRESH_COOKIE_NAME,
+        value=token,
+        max_age=int(_REFRESH_EXPIRE.total_seconds()),
+        path=_REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite='strict',
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=_REFRESH_COOKIE_NAME, path=_REFRESH_COOKIE_PATH)
 
 
 def _load_creds() -> dict | None:
@@ -203,7 +232,23 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     return payload
 
 
-def get_refresh_payload(token: str = Depends(oauth2_scheme)) -> dict:
+def _extract_refresh_token(
+    authorization: str | None = Header(None),
+    refresh_token_cookie: str | None = Cookie(None, alias=_REFRESH_COOKIE_NAME),
+) -> str:
+    """Native clients send the refresh token as `Authorization: Bearer ...`
+    (unchanged). Web clients send no such header and instead rely on the
+    httpOnly cookie set_refresh_cookie() wrote on login/refresh -- the browser
+    attaches it automatically to a same-origin request made with
+    `credentials: 'include'`."""
+    if authorization and authorization.lower().startswith('bearer '):
+        return authorization[len('bearer '):]
+    if refresh_token_cookie:
+        return refresh_token_cookie
+    raise HTTPException(status_code=401, detail='Not authenticated')
+
+
+def get_refresh_payload(token: str = Depends(_extract_refresh_token)) -> dict:
     payload = _decode(token)
     if payload.get('type') != 'refresh':
         raise HTTPException(status_code=401, detail='Refresh token required')

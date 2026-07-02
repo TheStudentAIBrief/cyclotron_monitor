@@ -14,14 +14,14 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from api.auth import (
-    authenticate, create_tokens, ensure_bootstrap_credentials, get_current_user,
-    get_refresh_payload, revoke_token,
+    authenticate, clear_refresh_cookie, create_tokens, ensure_bootstrap_credentials,
+    get_current_user, get_refresh_payload, revoke_token, set_refresh_cookie,
 )
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
@@ -57,6 +57,12 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_methods=['GET', 'POST'],
     allow_headers=['Authorization', 'Content-Type'],
+    # Needed for the web refresh-token cookie (set_refresh_cookie): the browser
+    # only attaches/accepts cookies on a cross-origin fetch when the server
+    # opts in here. Safe with an explicit allow-list (never '*', enforced
+    # above) -- allow_credentials with a wildcard origin is what's actually
+    # dangerous, and this app never does that.
+    allow_credentials=True,
 )
 
 # Reject oversized request bodies early (before parsing) to bound the memory/disk DoS
@@ -131,28 +137,36 @@ def _login_rate_ok(ip: str) -> bool:
 
 
 @app.post('/auth/login')
-def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
+def login(request: Request, response: Response, form: OAuth2PasswordRequestForm = Depends()):
     client_ip = request.client.host if request.client else 'unknown'
     if not _login_rate_ok(client_ip):
         raise HTTPException(status_code=429, detail='Too many login attempts. Try again later.')
     if not authenticate(form.username, form.password):
         raise HTTPException(status_code=401, detail='Invalid credentials')
     cfg = get_config()
-    return create_tokens(form.username, cfg.get('lab_id', 'default'))
+    tokens = create_tokens(form.username, cfg.get('lab_id', 'default'))
+    # Mirrors the refresh token into an httpOnly cookie for web (see api/auth.py's
+    # set_refresh_cookie docstring) -- native clients ignore Set-Cookie and keep
+    # using the JSON body's refresh_token via SecureStore, unaffected.
+    set_refresh_cookie(response, tokens['refresh_token'])
+    return tokens
 
 
 @app.post('/auth/refresh')
-def refresh_token(payload: dict = Depends(get_refresh_payload)):
-    return create_tokens(payload['sub'], payload['lab_id'])
+def refresh_token(response: Response, payload: dict = Depends(get_refresh_payload)):
+    tokens = create_tokens(payload['sub'], payload['lab_id'])
+    set_refresh_cookie(response, tokens['refresh_token'])
+    return tokens
 
 
 @app.post('/auth/logout')
-def logout(payload: dict = Depends(get_current_user)):
+def logout(response: Response, payload: dict = Depends(get_current_user)):
     # Revokes the access token used to call this endpoint. A stolen/leaked token
     # is no longer usable after this, instead of remaining valid until its
     # natural expiry (previously up to 30 days for a refresh token, no way to
     # invalidate it early at all).
     revoke_token(payload)
+    clear_refresh_cookie(response)
     return {'status': 'ok'}
 
 
