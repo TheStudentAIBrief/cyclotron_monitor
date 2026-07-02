@@ -42,16 +42,16 @@ class PetraceBatchRow(BaseModel):
     tracer_num: int = 0
     tracer_name: str = ''
     site: str = ''
-    duration_s: float = 0
+    duration_s: float | None = 0
     row_count: int = 0
     foil_no: int | None = None
-    peak_target_uA: float = 0
-    avg_target_uA: float = 0
-    total_muAh: float = 0
-    avg_arc_I: float = 0
-    avg_vacuum_P: float = 0
-    peak_vacuum_P: float = 0
-    rf_efficiency: float = 0
+    peak_target_uA: float | None = 0
+    avg_target_uA: float | None = 0
+    total_muAh: float | None = 0
+    avg_arc_I: float | None = 0
+    avg_vacuum_P: float | None = 0
+    peak_vacuum_P: float | None = 0
+    rf_efficiency: float | None = 0
     ingested_at: str
 
 

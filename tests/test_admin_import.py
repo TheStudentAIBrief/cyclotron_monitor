@@ -93,6 +93,18 @@ def test_import_petrace_batches_inserts_and_upserts(db_path):
     assert name == 'CHANGED'
 
 
+def test_import_petrace_batches_accepts_null_numeric_fields(db_path):
+    # Regression: the real local petrace_batches table has a row with
+    # avg_vacuum_P=NULL - the Pydantic model originally required a float,
+    # which 422'd the whole batch during the real migration run.
+    row = {'batch_no': 2, 'batch_date': '2026-01-02', 'ingested_at': '2026-01-02T00:00:00Z',
+           'avg_vacuum_P': None, 'peak_target_uA': None, 'duration_s': None, 'foil_no': None}
+    with TestClient(main.app) as client:
+        r = client.post('/api/admin/import/petrace-batches', json={'rows': [row]})
+    assert r.status_code == 200
+    assert r.json() == {'inserted': 1}
+
+
 def test_import_gauge_readings_inserts_and_is_idempotent(db_path):
     row = {'lab_id': 'petlabs-pretoria', 'gauge_name': 'Vacuum-P', 'timestamp': '2026-01-01T00:00:00Z',
            'value': 1e-6, 'unit': 'mbar', 'is_alert': 0, 'alert_reason': '', 'photo_path': '',
