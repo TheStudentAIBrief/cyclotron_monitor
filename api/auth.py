@@ -73,10 +73,19 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
     """
     creds_path = Path(db_path).parent / '.credentials.json'
     if creds_path.exists():
+        logging.getLogger('uvicorn.error').info(
+            'Bootstrap credentials check: %s already exists — skipping (this is '
+            'expected on every boot after the first).', creds_path,
+        )
         return
     username = os.environ.get('BOOTSTRAP_USERNAME', '').strip()
     password = os.environ.get('BOOTSTRAP_PASSWORD', '')
     if not username or not password:
+        logging.getLogger('uvicorn.error').warning(
+            'No login exists yet (%s not found) and BOOTSTRAP_USERNAME/'
+            'BOOTSTRAP_PASSWORD are not both set — nobody can log in until '
+            'both are configured and the service restarts.', creds_path,
+        )
         return
     if len(password) < 12:
         logging.getLogger('uvicorn.error').warning(

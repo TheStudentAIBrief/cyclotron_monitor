@@ -74,12 +74,36 @@ def test_bootstrap_does_nothing_when_env_vars_unset(tmp_path, monkeypatch):
     assert not (tmp_path / '.credentials.json').exists()
 
 
+def test_bootstrap_logs_when_env_vars_unset(tmp_path, monkeypatch, caplog):
+    # Regression: this branch used to return silently with zero log output,
+    # indistinguishable in Render's logs from a healthy no-op (credentials
+    # already existing) - impossible to diagnose "why can't I log in" remotely.
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.delenv('BOOTSTRAP_USERNAME', raising=False)
+    monkeypatch.delenv('BOOTSTRAP_PASSWORD', raising=False)
+    with caplog.at_level('INFO', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'BOOTSTRAP_USERNAME' in caplog.text
+    assert 'BOOTSTRAP_PASSWORD' in caplog.text
+
+
 def test_bootstrap_rejects_short_password(tmp_path, monkeypatch):
     db_path = str(tmp_path / 'petlab.db')
     monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
     monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'short')
     auth.ensure_bootstrap_credentials(db_path)
     assert not (tmp_path / '.credentials.json').exists()
+
+
+def test_bootstrap_logs_when_credentials_already_exist(tmp_path, monkeypatch, caplog):
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'existing', 'hash': 'unchanged'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    with caplog.at_level('INFO', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'already exist' in caplog.text.lower()
 
 
 def test_bootstrapped_credentials_authenticate_successfully(tmp_path, monkeypatch):
