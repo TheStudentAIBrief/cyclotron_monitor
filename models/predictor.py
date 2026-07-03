@@ -7,6 +7,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from models.blend import blend_days_and_risk
+
 _model_cache: dict[str, tuple[float, object]] = {}  # path → (mtime, deserialized obj)
 _log = logging.getLogger('cyclotron.predictor')
 
@@ -92,13 +94,27 @@ class PredictionResult:
     anomaly_score: float = None
 
 
-def _alert_level(days: float) -> str:
+def _alert_level(days: float, risk: float = None) -> str:
+    """days-based tiers are the primary signal (unchanged from the original
+    rule). risk, when supplied, can only ESCALATE past a calm days estimate,
+    never de-escalate a days-based alert - found empirically (2026-07-03
+    standalone model evaluation) that the isotonic days-calibrator averages
+    days-until-event over its whole risk bucket, so a genuinely strong
+    model_risk (standalone Spearman rho up to -0.82 vs actual days, p<0.005)
+    often still calibrates to a days number >14. Without this, that real
+    signal never reached the alert level at all.
+    """
     if days <= 3:
         return 'RED'
     if days <= 7:
         return 'ORANGE'
     if days <= 14:
         return 'YELLOW'
+    if risk is not None:
+        if risk >= 0.85:
+            return 'ORANGE'
+        if risk >= 0.7:
+            return 'YELLOW'
     return 'GREEN'
 
 
@@ -178,8 +194,7 @@ def predict(component: str, features: dict, model_dir: str,
     model_risk = float(model.predict_proba(X)[0, 1])
     model_days = float(days_cal.predict([model_risk])[0])
 
-    final_risk = max(counter_risk, model_risk)
-    final_days = max(0.0, min(counter_days, model_days))
+    final_days, final_risk = blend_days_and_risk(counter_days, counter_risk, model_days, model_risk)
 
     if counter_risk > model_risk:
         signal = 'COUNTER'
@@ -206,7 +221,7 @@ def predict(component: str, features: dict, model_dir: str,
         component=component,
         risk_score=round(final_risk, 3),
         days_estimate=round(final_days, 1),
-        alert_level=_alert_level(final_days),
+        alert_level=_alert_level(final_days, risk=final_risk),
         primary_signal=signal,
         top_reasons=reasons[:3],
         last_maintenance=last_maintenance or 'Unknown',
