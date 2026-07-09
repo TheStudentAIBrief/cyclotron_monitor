@@ -1,5 +1,6 @@
 """Ask AI endpoint — local RAG over live cyclotron data via Ollama."""
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from api.db_cloud import get_conn
 from api.ollama_manager import ensure_running
 
 router = APIRouter()
+_log = logging.getLogger('cyclotron.ask')
 
 OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 LLM_MODEL = os.environ.get('AI_LLM_MODEL', 'mistral:7b')
@@ -119,7 +121,11 @@ def ask(req: AskRequest, user: dict = Depends(get_current_user)):
     try:
         ensure_running()
     except RuntimeError as e:
-        raise HTTPException(503, detail=str(e))
+        # str(e) (e.g. "ollama binary not installed on this host") discloses
+        # internal host/environment detail to any authenticated caller -- log it
+        # server-side, return a generic message to the client.
+        _log.warning('ask: ensure_running failed: %s', e)
+        raise HTTPException(503, detail='AI assistant is temporarily unavailable')
 
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
