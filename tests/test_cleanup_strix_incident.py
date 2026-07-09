@@ -1,9 +1,10 @@
 """Test for the one-time /admin/cleanup-strix-import-incident-20260709 route.
 
-Verifies it deletes ONLY rows matching the exact incident signature, leaves
-real-looking historical rows untouched, and refuses to run if the matched
-count falls outside the expected 50k-300k sanity bound. Note: 'status' is a
-computed field in the read API (gauges.py's _gauge_status), not a stored
+Verifies it deletes ONLY rows matching the exact incident signature (id
+BETWEEN 398 AND 150398, confirmed via the inspect- diagnostic route against
+real production data), leaves real-looking historical rows untouched, and
+refuses to run if the matched count isn't exactly 150001. Note: 'status' is
+a computed field in the read API (gauges.py's _gauge_status), not a stored
 column - value IS NULL is what actually produces status='UNKNOWN'.
 """
 import tempfile
@@ -30,29 +31,29 @@ def db_path(monkeypatch):
     _config.get_config.cache_clear()
 
 
-def _insert(conn, *, gauge_name, value, confidence, timestamp):
+def _insert(conn, *, id, gauge_name, value, confidence, timestamp):
     conn.execute(
-        "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, confidence) "
-        "VALUES (?,?,?,?,?)",
-        ['petlabs-pretoria', gauge_name, timestamp, value, confidence],
+        "INSERT INTO gauge_readings (id, lab_id, gauge_name, timestamp, value, confidence) "
+        "VALUES (?,?,?,?,?,?)",
+        [id, 'petlabs-pretoria', gauge_name, timestamp, value, confidence],
     )
 
 
 def test_deletes_only_the_exact_incident_signature(db_path):
     conn = get_conn(db_path)
-    # 3 real, legitimate-looking rows that must survive.
-    _insert(conn, gauge_name='ISC_PRESSURE', value=101.3, confidence='verified',
+    # 3 real, legitimate-looking rows OUTSIDE the incident's id range - must survive.
+    _insert(conn, id=50, gauge_name='ISC_PRESSURE', value=101.3, confidence='verified',
             timestamp='2026-06-15T08:00:00+00:00')
-    _insert(conn, gauge_name='BL1_VACUUM', value=4.4e-07, confidence='ocr',
-            timestamp='2026-07-09T20:06:34+00:00')  # same ts, has a real value - must survive
-    _insert(conn, gauge_name='REAL_GAUGE', value=None, confidence='import',
-            timestamp='2026-07-09T20:06:34+00:00')  # real gauge_name, not blank - must survive
-    # 100,003 polluted rows matching the exact incident signature.
-    n_polluted = 100_003
+    _insert(conn, id=200, gauge_name='BL1_VACUUM', value=4.4e-07, confidence='ocr',
+            timestamp='2026-07-09T20:03:00+00:00')  # inside the incident's time window, but id is outside
+    _insert(conn, id=150500, gauge_name='REAL_GAUGE', value=None, confidence='import',
+            timestamp='2026-07-09T20:06:34+00:00')  # matches signature except id is outside the range
+    # Exactly 150,001 polluted rows at ids 398-150398 (the real, diagnostic-confirmed incident range).
     conn.executemany(
-        "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, confidence) "
-        "VALUES (?,?,?,?,?)",
-        [('petlabs-pretoria', '', '2026-07-09T20:06:34+00:00', None, 'import')] * n_polluted,
+        "INSERT INTO gauge_readings (id, lab_id, gauge_name, timestamp, value, confidence) "
+        "VALUES (?,?,?,?,?,?)",
+        [(i, 'petlabs-pretoria', '', '2026-07-09T20:02:51+00:00', None, 'import')
+         for i in range(398, 150399)],
     )
     conn.commit()
     conn.close()
@@ -61,7 +62,7 @@ def test_deletes_only_the_exact_incident_signature(db_path):
         r = client.post('/api/admin/cleanup-strix-import-incident-20260709')
     assert r.status_code == 200
     body = r.json()
-    assert body['rows_deleted'] == n_polluted
+    assert body['rows_deleted'] == 150001
     assert body['remaining_total_rows'] == 3
 
     conn = get_conn(db_path)
@@ -76,11 +77,11 @@ def test_deletes_only_the_exact_incident_signature(db_path):
 
 def test_refuses_when_matched_count_outside_sanity_bound(db_path):
     conn = get_conn(db_path)
-    # Only a handful of matching rows - nowhere near the expected 50k-300k.
+    # Only a handful of matching rows inside the id range - nowhere near the expected 150001.
     conn.executemany(
-        "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, confidence) "
-        "VALUES (?,?,?,?,?)",
-        [('petlabs-pretoria', '', '2026-07-09T20:06:34+00:00', None, 'import')] * 5,
+        "INSERT INTO gauge_readings (id, lab_id, gauge_name, timestamp, value, confidence) "
+        "VALUES (?,?,?,?,?,?)",
+        [(i, 'petlabs-pretoria', '', '2026-07-09T20:06:34+00:00', None, 'import') for i in range(398, 403)],
     )
     conn.commit()
     conn.close()

@@ -275,29 +275,32 @@ def import_gauge_readings(payload: GaugeReadingImport):
 def cleanup_strix_import_incident_20260709():
     """One-time remediation for a 2026-07-09 pentest incident: an unbounded CSV
     import (VULN-0003 - /api/gauges/import-csv had no row-count limit) inserted
-    ~145k garbage rows into gauge_readings, all sharing gauge_name='', value
-    NULL, confidence='import', timestamp starting '2026-07-09T20:06:34'. The
-    API's reported status='UNKNOWN' for these rows is a computed field (see
-    gauges.py's _gauge_status: value IS NULL => 'UNKNOWN'), not a real column -
-    already covered by the "value IS NULL" condition below. Scoped to that
-    exact 3-condition signature plus a sanity bound on the matched count so
-    this can never touch real historical readings. Meant to be run once via
-    direct call, then removed from the codebase - not a general-purpose
-    delete endpoint."""
+    150,001 garbage rows into gauge_readings (ids 398-150398, one exact
+    contiguous block confirmed via the inspect- diagnostic route), all sharing
+    gauge_name='', value NULL, confidence='import', timestamps spanning
+    2026-07-09T20:02:51 to 20:06:34 (a multi-minute bulk insert, not one
+    second - an earlier version of this route wrongly assumed a single-second
+    timestamp and its own sanity bound correctly refused to run). The API's
+    reported status='UNKNOWN' for these rows is a computed field (see
+    gauges.py's _gauge_status: value IS NULL => 'UNKNOWN'), not a real column.
+    Scoped to id BETWEEN 398 AND 150398 plus the same signature, with a tight
+    sanity bound around the confirmed 150,001 so this can never touch real
+    historical readings. Meant to be run once via direct call, then removed
+    from the codebase - not a general-purpose delete endpoint."""
     cfg = get_config()
     conn = get_conn(cfg['db_path'])
     match_sql = (
         "SELECT COUNT(*) FROM gauge_readings WHERE confidence='import' "
-        "AND timestamp LIKE '2026-07-09T20:06:34%' "
+        "AND id BETWEEN 398 AND 150398 "
         "AND (gauge_name IS NULL OR gauge_name='') AND value IS NULL"
     )
     try:
         match_count = conn.execute(match_sql).fetchone()[0]
-        if not (50000 <= match_count <= 300000):
+        if match_count != 150001:
             raise HTTPException(
                 409,
-                f'Refusing to delete: matched {match_count} rows, expected roughly '
-                '100k-200k for this known incident. Investigate before retrying.',
+                f'Refusing to delete: matched {match_count} rows, expected exactly '
+                '150001 (confirmed via the inspect- diagnostic route). Investigate before retrying.',
             )
         conn.execute(match_sql.replace('SELECT COUNT(*) FROM', 'DELETE FROM', 1))
         conn.commit()
