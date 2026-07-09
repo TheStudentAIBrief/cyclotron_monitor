@@ -269,3 +269,39 @@ def import_gauge_readings(payload: GaugeReadingImport):
         return {'inserted': inserted}
     finally:
         conn.close()
+
+
+@router.post('/admin/cleanup-strix-import-incident-20260709')
+def cleanup_strix_import_incident_20260709():
+    """One-time remediation for a 2026-07-09 pentest incident: an unbounded CSV
+    import (VULN-0003 - /api/gauges/import-csv had no row-count limit) inserted
+    ~145k garbage rows into gauge_readings, all sharing gauge_name='', value
+    NULL, confidence='import', timestamp starting '2026-07-09T20:06:34'. The
+    API's reported status='UNKNOWN' for these rows is a computed field (see
+    gauges.py's _gauge_status: value IS NULL => 'UNKNOWN'), not a real column -
+    already covered by the "value IS NULL" condition below. Scoped to that
+    exact 3-condition signature plus a sanity bound on the matched count so
+    this can never touch real historical readings. Meant to be run once via
+    direct call, then removed from the codebase - not a general-purpose
+    delete endpoint."""
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    match_sql = (
+        "SELECT COUNT(*) FROM gauge_readings WHERE confidence='import' "
+        "AND timestamp LIKE '2026-07-09T20:06:34%' "
+        "AND (gauge_name IS NULL OR gauge_name='') AND value IS NULL"
+    )
+    try:
+        match_count = conn.execute(match_sql).fetchone()[0]
+        if not (50000 <= match_count <= 300000):
+            raise HTTPException(
+                409,
+                f'Refusing to delete: matched {match_count} rows, expected roughly '
+                '100k-200k for this known incident. Investigate before retrying.',
+            )
+        conn.execute(match_sql.replace('SELECT COUNT(*) FROM', 'DELETE FROM', 1))
+        conn.commit()
+        remaining = conn.execute("SELECT COUNT(*) FROM gauge_readings").fetchone()[0]
+        return {'status': 'ok', 'rows_deleted': match_count, 'remaining_total_rows': remaining}
+    finally:
+        conn.close()
