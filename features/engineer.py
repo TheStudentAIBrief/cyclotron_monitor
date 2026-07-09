@@ -13,16 +13,26 @@ COMPONENT_PARAMS = {
     'BL2 Target 1':  ['AI_BL2_TARG_CUR', 'AI_BL2_FOIL_CUR', 'AI_BOP_CUR'],
 }
 # IS fault codes: original set + 10807 (high IS current, 2.7x spike) + 10504 (bias PSU off, 2.4x)
-IS_FAULT_CODES = ('10802', '10804', '10807', '10808', '10809', '10504')
+# + 10901/11d01/11d03 (QEI RF-controller unlock/ack failures — 7.9x rate in the 14d before
+# ION SOURCE maintenance across full archive history, ~99% of all occurrences fall in that window)
+IS_FAULT_CODES = ('10802', '10804', '10807', '10808', '10809', '10504',
+                   '10901', '11d01', '11d03')
 # BL fault codes: original + 10205 (high collimator current on BL1, 1.9x spike)
-BL_FAULT_CODES = ('10401', '10f01', '10205')
+# + 10206 (stray target current on BL1, water conductivity — 9.7x before FOILS, 6.9x before
+# BL1 Target 1) + 10207 (stray foil current on non-active BL2 — 3.6x before FOILS)
+BL_FAULT_CODES = ('10401', '10f01', '10205', '10206', '10207')
 # Vacuum fault codes: 12072 (high tank pressure, 1.5x spike pre-maintenance)
 VACUUM_FAULT_CODES = ('12072',)
+
+# Real vendor warning-message prefixes (events table, code 11001) — see
+# models/counter.py's COMPONENT_KEYS for the full explanation and confirmation
+# source. NOT the same as the setlifetime{} command keys used by
+# parsers/maintenance_labels.py, which is a different vocabulary/purpose.
 COMPONENT_KEYS = {
-    'ION SOURCE': 'isc_amphrs',
-    'FOILS': 'bl1_foil1_uamphrs',
-    'BL1 Target 1': 'bl1_targ1_uamphrs',
-    'BL2 Target 1': 'bl2_targ1_uamphrs',
+    'ION SOURCE': 'ion source Amp-hrs',
+    'FOILS': 'BL1 foil 1 uAmp-hrs',
+    'BL1 Target 1': 'BL1 target 1 uAmp-hrs',
+    'BL2 Target 1': 'BL2 target 1 uAmp-hrs',  # unverified, see models/counter.py comment
 }
 # All 6 foils are always replaced together; stored as separate labels in the DB
 FOILS_LABELS = ('BL1 Foil 1', 'BL1 Foil 2', 'BL1 Foil 3',
@@ -30,6 +40,15 @@ FOILS_LABELS = ('BL1 Foil 1', 'BL1 Foil 2', 'BL1 Foil 3',
 # Minimum beam readings required per window — cyclotron runs ~5-6 days/week so
 # a 7-calendar-day window yields ~5 readings on average; requiring 7 would NaN 86% of samples
 MIN_READINGS = {7: 3, 14: 5, 30: 7}
+
+# petrace_batches: per-batch production log, not daily-aggregated like beam_daily, and far
+# sparser (42 distinct dates across ~339 days, bursty — median gap 2d but mean gap 8.2d).
+# total_muAh (beam throughput) and rf_efficiency both showed a significant pre-maintenance
+# drop for BL2 Target 1 (d=-0.67 / -0.48) and FOILS (d=-0.58 for total_muAh).
+# Coverage is 2024-06-16..2025-05-20 only — ingestion has not produced newer rows since,
+# so these features will be NaN for any target_date after that until ingestion resumes.
+PETRACE_COLS = ('total_muAh', 'rf_efficiency')
+PETRACE_MIN_READINGS = {7: 1, 14: 2, 30: 3}
 
 
 def _slope(values):
@@ -66,6 +85,32 @@ def _query_daily_means(conn, params, start: date, end: date) -> dict:
     raw = _query_daily_stats(conn, params, start, end)
     return {param: {d: v[0] for d, v in dates.items()}
             for param, dates in raw.items()}
+
+
+def _query_petrace_daily(conn, cols, start: date, end: date) -> dict:
+    """Return {col: {date: mean}} from petrace_batches, averaging same-date batches.
+    A DB with no petrace_batches table (e.g. a lab with no PETrace 800, or a test
+    fixture not set up for it) is treated the same as one with no rows in range —
+    empty result, features fall back to NaN — rather than a hard crash."""
+    ph = ', '.join(cols)
+    try:
+        rows = conn.execute(
+            f"SELECT batch_date, {ph} FROM petrace_batches WHERE batch_date >= ? AND batch_date < ?",
+            [start.isoformat(), end.isoformat()]
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {c: {} for c in cols}
+    sums: dict = {c: {} for c in cols}
+    counts: dict = {c: {} for c in cols}
+    for row in rows:
+        d = row[0]
+        for i, col in enumerate(cols):
+            v = row[i + 1]
+            if v is None:
+                continue
+            sums[col][d] = sums[col].get(d, 0.0) + v
+            counts[col][d] = counts[col].get(d, 0) + 1
+    return {col: {d: sums[col][d] / counts[col][d] for d in sums[col]} for col in cols}
 
 
 def _last_maintenance_date(conn, component: str, before: date = None):
@@ -121,6 +166,24 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
                     features[f'{param}_{w}d_slope'] = _slope(y_mean)
                     features[f'{param}_{w}d_p10']   = float(np.mean(p10_vals)) if p10_vals else np.nan
                     features[f'{param}_{w}d_p90']   = float(np.mean(p90_vals)) if p90_vals else np.nan
+
+        for w in (7, 14, 30):
+            start = target_date - timedelta(days=w)
+            petrace_daily = _query_petrace_daily(conn, PETRACE_COLS, start, target_date)
+            min_req = PETRACE_MIN_READINGS[w]
+            for col in PETRACE_COLS:
+                vals_dict = petrace_daily.get(col, {})
+                valid_dates = sorted(vals_dict)
+                n = len(valid_dates)
+                if n < min_req:
+                    features[f'petrace_{col}_{w}d_mean']  = np.nan
+                    features[f'petrace_{col}_{w}d_std']   = np.nan
+                    features[f'petrace_{col}_{w}d_slope'] = np.nan
+                else:
+                    y = np.array([vals_dict[d] for d in valid_dates], dtype=float)
+                    features[f'petrace_{col}_{w}d_mean']  = float(np.mean(y))
+                    features[f'petrace_{col}_{w}d_std']   = float(np.std(y))
+                    features[f'petrace_{col}_{w}d_slope'] = _slope(y)
 
         for code in IS_FAULT_CODES:
             for w, label in ((7, '7d'), (14, '14d')):
