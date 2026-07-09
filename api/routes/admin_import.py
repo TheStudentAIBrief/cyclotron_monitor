@@ -271,62 +271,9 @@ def import_gauge_readings(payload: GaugeReadingImport):
         conn.close()
 
 
-@router.post('/admin/cleanup-strix-import-incident-20260709')
-def cleanup_strix_import_incident_20260709():
-    """One-time remediation for a 2026-07-09 pentest incident: an unbounded CSV
-    import (VULN-0003 - /api/gauges/import-csv had no row-count limit) inserted
-    150,001 garbage rows into gauge_readings (ids 398-150398, one exact
-    contiguous block confirmed via the inspect- diagnostic route), all sharing
-    gauge_name='', value NULL, confidence='import', timestamps spanning
-    2026-07-09T20:02:51 to 20:06:34 (a multi-minute bulk insert, not one
-    second - an earlier version of this route wrongly assumed a single-second
-    timestamp and its own sanity bound correctly refused to run). The API's
-    reported status='UNKNOWN' for these rows is a computed field (see
-    gauges.py's _gauge_status: value IS NULL => 'UNKNOWN'), not a real column.
-    Scoped to id BETWEEN 398 AND 150398 plus the same signature, with a tight
-    sanity bound around the confirmed 150,001 so this can never touch real
-    historical readings. Meant to be run once via direct call, then removed
-    from the codebase - not a general-purpose delete endpoint."""
-    cfg = get_config()
-    conn = get_conn(cfg['db_path'])
-    match_sql = (
-        "SELECT COUNT(*) FROM gauge_readings WHERE confidence='import' "
-        "AND id BETWEEN 398 AND 150398 "
-        "AND (gauge_name IS NULL OR gauge_name='') AND value IS NULL"
-    )
-    try:
-        match_count = conn.execute(match_sql).fetchone()[0]
-        if match_count != 150001:
-            raise HTTPException(
-                409,
-                f'Refusing to delete: matched {match_count} rows, expected exactly '
-                '150001 (confirmed via the inspect- diagnostic route). Investigate before retrying.',
-            )
-        conn.execute(match_sql.replace('SELECT COUNT(*) FROM', 'DELETE FROM', 1))
-        conn.commit()
-        remaining = conn.execute("SELECT COUNT(*) FROM gauge_readings").fetchone()[0]
-        return {'status': 'ok', 'rows_deleted': match_count, 'remaining_total_rows': remaining}
-    finally:
-        conn.close()
-
-
-@router.get('/admin/inspect-strix-import-incident-20260709')
-def inspect_strix_import_incident_20260709():
-    """Read-only diagnostic for the incident above -- the exact-second timestamp
-    filter used by the cleanup route only matched 4224 rows against production
-    (a bulk row-by-row insert of ~150k rows plausibly spans several seconds of
-    wall-clock time, not one). Returns the true count/timestamp range for the
-    broader signature (no timestamp restriction) so the cleanup filter can be
-    corrected. Temporary, same lifecycle as the cleanup route above."""
-    cfg = get_config()
-    conn = get_conn(cfg['db_path'])
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n, MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts, "
-            "MIN(id) AS min_id, MAX(id) AS max_id FROM gauge_readings "
-            "WHERE confidence='import' AND (gauge_name IS NULL OR gauge_name='') "
-            "AND value IS NULL"
-        ).fetchone()
-        return dict(row)
-    finally:
-        conn.close()
+# NOTE: the temporary /admin/cleanup-strix-import-incident-20260709 and
+# /admin/inspect-strix-import-incident-20260709 routes that lived here have
+# been removed - they did their one job (deleted exactly 150,001 rows
+# polluted by a 2026-07-09 pentest incident, verified via a read-only
+# follow-up check) and are gone now that the incident is resolved. See
+# commit history / vault Security notes for the full writeup.
