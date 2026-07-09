@@ -80,6 +80,13 @@ async def _limit_request_body(request: Request, call_next):
             return JSONResponse({'detail': 'Invalid Content-Length'}, status_code=400)
         if too_big:
             return JSONResponse({'detail': 'Request body too large'}, status_code=413)
+        return await call_next(request)
+    # No Content-Length (e.g. chunked transfer-encoding) means the check above
+    # never runs, so a request with no declared size could stream an unbounded
+    # body straight past this middleware. All legitimate clients (mobile app,
+    # sync scripts, browser dashboard) always send Content-Length, so require it.
+    if 'chunked' in request.headers.get('transfer-encoding', '').lower():
+        return JSONResponse({'detail': 'Content-Length required'}, status_code=411)
     return await call_next(request)
 
 
@@ -119,27 +126,49 @@ def health():
 # Not shared across multiple server processes; fine for this app's single-instance
 # deployment (Render free tier, local dev).
 _LOGIN_MAX_ATTEMPTS_PER_MINUTE = int(os.environ.get('LOGIN_RATE_LIMIT_PER_MIN', '10'))
+# Bounds memory growth from an attacker cycling through many source IPs/usernames —
+# same cap + eviction shape as serve.py's _rate_ok / _MAX_TRACKED_IPS.
+_MAX_TRACKED_LOGIN_KEYS = 1024
 _login_rate_lock = threading.Lock()
 _login_rate_counts: dict = defaultdict(lambda: (0, 0.0))
+# Secondary per-username limiter: the per-IP limiter alone doesn't stop a
+# distributed brute-force (many IPs, one target username).
+_login_username_rate_counts: dict = defaultdict(lambda: (0, 0.0))
+
+
+def _rate_ok(counts: dict, key: str, max_per_minute: int) -> bool:
+    with _login_rate_lock:
+        count, window_start = counts[key]
+        now = time.monotonic()
+        if now - window_start > 60.0:
+            if len(counts) > _MAX_TRACKED_LOGIN_KEYS:
+                expired = [k for k, (_, ws) in list(counts.items()) if now - ws > 60.0]
+                for k in expired:
+                    del counts[k]
+            counts[key] = (1, now)
+            return True
+        if count >= max_per_minute:
+            return False
+        counts[key] = (count + 1, window_start)
+        return True
 
 
 def _login_rate_ok(ip: str) -> bool:
-    with _login_rate_lock:
-        count, window_start = _login_rate_counts[ip]
-        now = time.monotonic()
-        if now - window_start > 60.0:
-            _login_rate_counts[ip] = (1, now)
-            return True
-        if count >= _LOGIN_MAX_ATTEMPTS_PER_MINUTE:
-            return False
-        _login_rate_counts[ip] = (count + 1, window_start)
-        return True
+    return _rate_ok(_login_rate_counts, ip, _LOGIN_MAX_ATTEMPTS_PER_MINUTE)
+
+
+def _login_rate_ok_username(username: str) -> bool:
+    return _rate_ok(_login_username_rate_counts, username, _LOGIN_MAX_ATTEMPTS_PER_MINUTE)
 
 
 @app.post('/auth/login')
 def login(request: Request, response: Response, form: OAuth2PasswordRequestForm = Depends()):
     client_ip = request.client.host if request.client else 'unknown'
-    if not _login_rate_ok(client_ip):
+    # Evaluate both explicitly (not `or`-short-circuited) so each counter always
+    # updates regardless of which limit trips first.
+    ip_ok = _login_rate_ok(client_ip)
+    username_ok = _login_rate_ok_username(form.username)
+    if not ip_ok or not username_ok:
         raise HTTPException(status_code=429, detail='Too many login attempts. Try again later.')
     if not authenticate(form.username, form.password):
         raise HTTPException(status_code=401, detail='Invalid credentials')

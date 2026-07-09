@@ -173,12 +173,19 @@ def import_petrace_batches(payload: PetraceBatchImport):
 def import_maintenance_events(payload: MaintenanceEventImport):
     _check_batch_size(payload.rows)
     cfg = get_config()
+    # lab_id comes from this deployment's own config, not the request body — the
+    # local push script (scripts/push_data_to_cloud.py) reads from a local DB
+    # that has no concept of lab_id for this table, and a client-supplied lab_id
+    # would let one caller write into another lab's records.
+    lab_id = cfg.get('lab_id', 'default')
     conn = get_conn(cfg['db_path'])
     try:
         for row in payload.rows:
             conn.execute(
-                "INSERT OR REPLACE INTO maintenance_events VALUES (?,?,?,?)",
-                [row.timestamp, row.component_key, row.component_label, row.source_file],
+                "INSERT OR REPLACE INTO maintenance_events "
+                "(timestamp, component_key, component_label, source_file, lab_id) "
+                "VALUES (?,?,?,?,?)",
+                [row.timestamp, row.component_key, row.component_label, row.source_file, lab_id],
             )
         conn.commit()
         return {'inserted': len(payload.rows)}
@@ -190,13 +197,16 @@ def import_maintenance_events(payload: MaintenanceEventImport):
 def import_predictions(payload: PredictionImport):
     _check_batch_size(payload.rows)
     cfg = get_config()
+    lab_id = cfg.get('lab_id', 'default')
     conn = get_conn(cfg['db_path'])
     try:
         for row in payload.rows:
             conn.execute(
-                "INSERT OR REPLACE INTO predictions VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO predictions "
+                "(run_at, component, risk_score, days_estimate, alert_level, "
+                " primary_signal, top_features, lab_id) VALUES (?,?,?,?,?,?,?,?)",
                 [row.run_at, row.component, row.risk_score, row.days_estimate,
-                 row.alert_level, row.primary_signal, row.top_features],
+                 row.alert_level, row.primary_signal, row.top_features, lab_id],
             )
         conn.commit()
         return {'inserted': len(payload.rows)}
@@ -208,12 +218,16 @@ def import_predictions(payload: PredictionImport):
 def import_events(payload: EventImport):
     _check_batch_size(payload.rows)
     cfg = get_config()
+    lab_id = cfg.get('lab_id', 'default')
     conn = get_conn(cfg['db_path'])
     try:
         for row in payload.rows:
             conn.execute(
-                "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)",
-                [row.timestamp, row.severity, row.code, row.function, row.message, row.source_file],
+                "INSERT OR IGNORE INTO events "
+                "(timestamp, severity, code, function, message, source_file, lab_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                [row.timestamp, row.severity, row.code, row.function, row.message,
+                 row.source_file, lab_id],
             )
         conn.commit()
         return {'inserted': len(payload.rows)}
@@ -225,13 +239,17 @@ def import_events(payload: EventImport):
 def import_gauge_readings(payload: GaugeReadingImport):
     _check_batch_size(payload.rows)
     cfg = get_config()
+    # lab_id comes from this deployment's own config, not the request body — see
+    # the same note on import_maintenance_events above. row.lab_id is accepted
+    # for backward API compatibility but intentionally never used below.
+    lab_id = cfg.get('lab_id', 'default')
     conn = get_conn(cfg['db_path'])
     try:
         inserted = 0
         for row in payload.rows:
             existing = conn.execute(
                 "SELECT 1 FROM gauge_readings WHERE lab_id=? AND gauge_name=? AND timestamp=?",
-                [row.lab_id, row.gauge_name, row.timestamp],
+                [lab_id, row.gauge_name, row.timestamp],
             ).fetchone()
             if existing:
                 continue
@@ -241,7 +259,7 @@ def import_gauge_readings(payload: GaugeReadingImport):
                 " photo_path, raw_ocr_text, location, alert_lo, alert_hi, action_lo, "
                 " action_hi, confidence, verified_by, verified_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                [row.lab_id, row.gauge_name, row.timestamp, row.value, row.unit,
+                [lab_id, row.gauge_name, row.timestamp, row.value, row.unit,
                  row.is_alert, row.alert_reason, row.photo_path, row.raw_ocr_text,
                  row.location, row.alert_lo, row.alert_hi, row.action_lo,
                  row.action_hi, row.confidence, row.verified_by, row.verified_at],

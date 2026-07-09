@@ -9,6 +9,7 @@ import logging
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 _log = logging.getLogger('cyclotron.cloud_sync')
 
@@ -27,6 +28,12 @@ def sync_if_configured(dashboard_path: str) -> None:
     """Read dashboard.json and POST it to the cloud API if cloud config is present."""
     url, key = _read_cloud_cfg()
     if not url or not key:
+        return
+    # urllib.request.urlopen also supports file:// (and other) schemes; config.json
+    # is admin-controlled, not user input, but this closes off that class of
+    # SSRF/local-file-read defense-in-depth gap for near-zero cost.
+    if urlsplit(url).scheme not in ('http', 'https'):
+        _log.warning('cloud_sync: cloud_api_url has an unsupported scheme, skipping: %s', url)
         return
 
     try:

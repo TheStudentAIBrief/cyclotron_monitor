@@ -131,6 +131,20 @@ _MIGRATIONS = [
     "ALTER TABLE gauge_readings ADD COLUMN confidence TEXT DEFAULT ''",
     "ALTER TABLE gauge_readings ADD COLUMN verified_by TEXT DEFAULT ''",
     "ALTER TABLE gauge_readings ADD COLUMN verified_at TEXT DEFAULT ''",
+    # These three tables were never scoped by lab -- structurally unable to
+    # isolate labs from each other's records (F-004 hardening). Backfilled
+    # to 'petlabs-pretoria' since that's the only lab_id this deployment has
+    # ever run under; new rows get it from the server's own config, not client
+    # input (see api/routes/admin_import.py).
+    "ALTER TABLE maintenance_events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
+    "ALTER TABLE predictions ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
+    "ALTER TABLE events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
+]
+
+_POST_MIGRATION_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_maint_lab_ts ON maintenance_events(lab_id, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_predictions_lab_run ON predictions(lab_id, run_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_events_lab_ts ON events(lab_id, timestamp DESC)",
 ]
 
 
@@ -144,6 +158,8 @@ def init_cloud_tables(db_path: str) -> None:
             conn.execute(sql)
         except sqlite3.OperationalError:
             pass  # column already exists
+    for sql in _POST_MIGRATION_INDEXES:
+        conn.execute(sql)  # index creation is idempotent regardless of column history
     conn.commit()
     conn.close()
 
