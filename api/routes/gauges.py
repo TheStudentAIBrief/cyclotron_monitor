@@ -45,6 +45,10 @@ _OLLAMA_MODEL = os.environ.get('GAUGE_OLLAMA_MODEL', '').strip()
 # cannot be read unbounded into memory.
 _MAX_EUR_PHOTOS = int(os.environ.get('MAX_EUR_PHOTOS', '20'))
 _MAX_CSV_BYTES = int(os.environ.get('MAX_CSV_BYTES', str(10 * 1024 * 1024)))
+# VULN-0003 (2026-07-09 pentest): _MAX_CSV_BYTES alone doesn't bound row count -
+# a 10MB file of short rows can still be hundreds of thousands of INSERTs. This
+# caused a real production incident (150,001 garbage rows, cleaned up separately).
+_MAX_CSV_ROWS = int(os.environ.get('MAX_CSV_ROWS', '5000'))
 
 _OCR_SCHEMA = {
     "type": "object",
@@ -392,6 +396,12 @@ async def import_gauge_csv(
     conn = get_conn(cfg['db_path'])
     try:
         for i, row in enumerate(reader):
+            if i >= _MAX_CSV_ROWS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f'CSV exceeds the {_MAX_CSV_ROWS}-row limit (row {i + 2}+). '
+                           'Split into smaller files.',
+                )
             try:
                 gauge    = str(row.get('gauge', '')).strip()
                 location = str(row.get('location', '')).strip()
