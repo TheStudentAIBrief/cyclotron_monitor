@@ -305,3 +305,25 @@ def cleanup_strix_import_incident_20260709():
         return {'status': 'ok', 'rows_deleted': match_count, 'remaining_total_rows': remaining}
     finally:
         conn.close()
+
+
+@router.get('/admin/inspect-strix-import-incident-20260709')
+def inspect_strix_import_incident_20260709():
+    """Read-only diagnostic for the incident above -- the exact-second timestamp
+    filter used by the cleanup route only matched 4224 rows against production
+    (a bulk row-by-row insert of ~150k rows plausibly spans several seconds of
+    wall-clock time, not one). Returns the true count/timestamp range for the
+    broader signature (no timestamp restriction) so the cleanup filter can be
+    corrected. Temporary, same lifecycle as the cleanup route above."""
+    cfg = get_config()
+    conn = get_conn(cfg['db_path'])
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts, "
+            "MIN(id) AS min_id, MAX(id) AS max_id FROM gauge_readings "
+            "WHERE confidence='import' AND (gauge_name IS NULL OR gauge_name='') "
+            "AND value IS NULL"
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()

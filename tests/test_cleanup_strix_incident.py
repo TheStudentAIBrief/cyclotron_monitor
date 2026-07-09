@@ -95,6 +95,31 @@ def test_refuses_when_matched_count_outside_sanity_bound(db_path):
     assert count == 5  # nothing deleted
 
 
+def test_inspect_reports_true_range_without_deleting(db_path):
+    conn = get_conn(db_path)
+    conn.executemany(
+        "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, confidence) "
+        "VALUES (?,?,?,?,?)",
+        [('petlabs-pretoria', '', ts, None, 'import')
+         for ts in ('2026-07-09T20:06:30+00:00', '2026-07-09T20:06:34+00:00', '2026-07-09T20:06:41+00:00')],
+    )
+    conn.commit()
+    conn.close()
+
+    with TestClient(main.app) as client:
+        r = client.get('/api/admin/inspect-strix-import-incident-20260709')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['n'] == 3
+    assert body['min_ts'] == '2026-07-09T20:06:30+00:00'
+    assert body['max_ts'] == '2026-07-09T20:06:41+00:00'
+
+    conn = get_conn(db_path)
+    count = conn.execute("SELECT COUNT(*) FROM gauge_readings").fetchone()[0]
+    conn.close()
+    assert count == 3  # nothing deleted - read-only
+
+
 def test_requires_auth(db_path):
     main.app.dependency_overrides.pop(get_current_user, None)
     try:
