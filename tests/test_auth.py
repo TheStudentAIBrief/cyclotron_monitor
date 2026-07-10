@@ -1,8 +1,11 @@
 """Auth-layer security tests (added during security hardening).
 
 Covers the JWT signing-key handling: tokens round-trip, the process key is never
-the old public default, and a token forged with that default is rejected.
+the old public default, and a token forged with that default is rejected. Also
+covers jti-based revocation (POST /auth/logout support).
 """
+import json
+
 import jwt
 import pytest
 from fastapi import HTTPException
@@ -10,7 +13,24 @@ from fastapi import HTTPException
 from api import auth
 
 
-def test_access_token_roundtrips():
+@pytest.fixture
+def cloud_db(tmp_path, monkeypatch):
+    """_decode() checks revocation status against get_config()['db_path'], so
+    any test that decodes a token needs a real DB with revoked_tokens present."""
+    from api import config as _config
+    from api.db_cloud import init_cloud_tables
+
+    db_path = str(tmp_path / 'petlab.db')
+    init_cloud_tables(db_path)
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    _config.get_config.cache_clear()
+    try:
+        yield db_path
+    finally:
+        _config.get_config.cache_clear()
+
+
+def test_access_token_roundtrips(cloud_db):
     toks = auth.create_tokens('alice', 'lab1')
     payload = auth._decode(toks['access_token'])
     assert payload['sub'] == 'alice'
@@ -18,13 +38,36 @@ def test_access_token_roundtrips():
     assert payload['type'] == 'access'
 
 
-def test_refresh_token_type_is_enforced():
+def test_refresh_token_type_is_enforced(cloud_db):
     toks = auth.create_tokens('alice', 'lab1')
     # an access token must not be usable where a refresh token is required
     access_payload = auth._decode(toks['access_token'])
     assert access_payload['type'] == 'access'
     refresh_payload = auth._decode(toks['refresh_token'])
     assert refresh_payload['type'] == 'refresh'
+
+
+def test_revoked_token_is_rejected(cloud_db):
+    toks = auth.create_tokens('alice', 'lab1')
+    payload = auth._decode(toks['access_token'])
+    auth.revoke_token(payload)
+    with pytest.raises(HTTPException):
+        auth._decode(toks['access_token'])
+
+
+def test_revoking_one_token_does_not_affect_another(cloud_db):
+    toks_a = auth.create_tokens('alice', 'lab1')
+    toks_b = auth.create_tokens('alice', 'lab1')
+    auth.revoke_token(auth._decode(toks_a['access_token']))
+    with pytest.raises(HTTPException):
+        auth._decode(toks_a['access_token'])
+    # a second, independently-issued token for the same user is unaffected
+    assert auth._decode(toks_b['access_token'])['sub'] == 'alice'
+
+
+def test_revoke_token_without_jti_is_a_no_op(cloud_db):
+    # tokens minted before this feature existed have no 'jti' claim
+    auth.revoke_token({'sub': 'alice', 'exp': 9999999999})  # must not raise
 
 
 def test_signing_key_is_not_the_old_public_default():
@@ -38,3 +81,132 @@ def test_token_forged_with_old_default_secret_is_rejected():
     )
     with pytest.raises(HTTPException):
         auth._decode(forged)
+
+
+# ── Bootstrap credentials (fresh deploy, no data/.credentials.json yet) ────────
+
+def test_bootstrap_creates_credentials_when_missing(tmp_path, monkeypatch):
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    auth.ensure_bootstrap_credentials(db_path)
+    creds_path = tmp_path / '.credentials.json'
+    assert creds_path.exists()
+    creds = json.loads(creds_path.read_text())
+    assert creds['username'] == 'admin'
+    assert auth._verify_password('a-strong-password-123', creds['hash'])
+
+
+def test_bootstrap_does_not_overwrite_existing_credentials(tmp_path, monkeypatch):
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'existing', 'hash': 'unchanged'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    monkeypatch.delenv('BOOTSTRAP_FORCE_RESET', raising=False)
+    auth.ensure_bootstrap_credentials(db_path)
+    assert json.loads(creds_path.read_text()) == {'username': 'existing', 'hash': 'unchanged'}
+
+
+def test_bootstrap_force_reset_replaces_existing_credentials(tmp_path, monkeypatch):
+    # Covers the no-shell-access recovery path: a Render deploy already created
+    # data/.credentials.json (e.g. from an earlier/different BOOTSTRAP_PASSWORD
+    # value), and the only way to reset it without shell access is this flag.
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-new-strong-password-456')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+
+    auth.ensure_bootstrap_credentials(db_path)
+
+    creds = json.loads(creds_path.read_text())
+    assert creds['username'] == 'new-user'
+    assert auth._verify_password('a-new-strong-password-456', creds['hash'])
+
+
+def test_bootstrap_force_reset_logs_a_warning(tmp_path, monkeypatch, caplog):
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-new-strong-password-456')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+    with caplog.at_level('WARNING', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'BOOTSTRAP_FORCE_RESET' in caplog.text
+
+
+def test_bootstrap_force_reset_without_valid_new_credentials_still_deletes_but_does_not_recreate(
+    tmp_path, monkeypatch,
+):
+    # Edge case: force-reset is set but the new username/password are missing or
+    # too short - the stale file is still removed (so a corrected next boot can
+    # succeed) but nothing insecure gets written.
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'new-user')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'short')
+    monkeypatch.setenv('BOOTSTRAP_FORCE_RESET', 'true')
+
+    auth.ensure_bootstrap_credentials(db_path)
+
+    assert not creds_path.exists()
+
+
+def test_bootstrap_does_nothing_when_env_vars_unset(tmp_path, monkeypatch):
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.delenv('BOOTSTRAP_USERNAME', raising=False)
+    monkeypatch.delenv('BOOTSTRAP_PASSWORD', raising=False)
+    auth.ensure_bootstrap_credentials(db_path)
+    assert not (tmp_path / '.credentials.json').exists()
+
+
+def test_bootstrap_logs_when_env_vars_unset(tmp_path, monkeypatch, caplog):
+    # Regression: this branch used to return silently with zero log output,
+    # indistinguishable in Render's logs from a healthy no-op (credentials
+    # already existing) - impossible to diagnose "why can't I log in" remotely.
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.delenv('BOOTSTRAP_USERNAME', raising=False)
+    monkeypatch.delenv('BOOTSTRAP_PASSWORD', raising=False)
+    with caplog.at_level('INFO', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'BOOTSTRAP_USERNAME' in caplog.text
+    assert 'BOOTSTRAP_PASSWORD' in caplog.text
+
+
+def test_bootstrap_rejects_short_password(tmp_path, monkeypatch):
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'short')
+    auth.ensure_bootstrap_credentials(db_path)
+    assert not (tmp_path / '.credentials.json').exists()
+
+
+def test_bootstrap_logs_when_credentials_already_exist(tmp_path, monkeypatch, caplog):
+    db_path = str(tmp_path / 'petlab.db')
+    creds_path = tmp_path / '.credentials.json'
+    creds_path.write_text(json.dumps({'username': 'existing', 'hash': 'unchanged'}))
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    with caplog.at_level('INFO', logger='uvicorn.error'):
+        auth.ensure_bootstrap_credentials(db_path)
+    assert 'already exist' in caplog.text.lower()
+
+
+def test_bootstrapped_credentials_authenticate_successfully(tmp_path, monkeypatch):
+    db_path = str(tmp_path / 'petlab.db')
+    monkeypatch.setenv('BOOTSTRAP_USERNAME', 'admin')
+    monkeypatch.setenv('BOOTSTRAP_PASSWORD', 'a-strong-password-123')
+    auth.ensure_bootstrap_credentials(db_path)
+
+    from api import config as _config
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    _config.get_config.cache_clear()
+    try:
+        assert auth.authenticate('admin', 'a-strong-password-123') is True
+        assert auth.authenticate('admin', 'wrong-password') is False
+    finally:
+        _config.get_config.cache_clear()

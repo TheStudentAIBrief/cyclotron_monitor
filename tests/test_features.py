@@ -46,6 +46,42 @@ def test_engineer_computes_fault_rates(tmp_path):
     assert f.get('fault_is_10802_7d', 0) == 3
 
 
+def test_engineer_counts_real_ion_source_lifetime_warning_messages(tmp_path):
+    # Real production message format (confirmed against data/cyclotron.db):
+    # "ion source Amp-hrs lifetime counter <value> is over <threshold>"
+    target = date(2025, 3, 15)
+    events = [
+        (f'2025-03-{9+i:02d} 10:00:00', 'warning', '11001', 'func',
+         f'ion source Amp-hrs lifetime counter {40+i}.0 is over 45', 'hyper.log')
+        for i in range(3)
+    ]
+    db = setup_test_db(tmp_path, event_rows=events)
+    f = build_features(target, 'ION SOURCE', db)
+    # Before the fix, COMPONENT_KEYS['ION SOURCE'] = 'isc_amphrs' never matches
+    # the real message text ("ion source Amp-hrs...") and this is always 0.
+    assert f.get('fault_11001_14d', 0) == 3
+
+
+def test_engineer_computes_petrace_features(tmp_path):
+    target = date(2025, 3, 15)
+    petrace = [
+        (i, (target - timedelta(days=14 - i)).isoformat(), 50.0 + i, 0.85)
+        for i in range(3)
+    ]
+    db = setup_test_db(tmp_path, petrace_rows=petrace)
+    f = build_features(target, 'BL2 Target 1', db)
+    assert not np.isnan(f.get('petrace_total_muAh_14d_mean', np.nan))
+    assert abs(f['petrace_total_muAh_14d_mean'] - 51.0) < 0.01
+    assert abs(f['petrace_rf_efficiency_14d_mean'] - 0.85) < 0.01
+
+
+def test_engineer_petrace_nan_when_below_min_readings(tmp_path):
+    target = date(2025, 3, 15)
+    db = setup_test_db(tmp_path)
+    f = build_features(target, 'BL2 Target 1', db)
+    assert np.isnan(f.get('petrace_total_muAh_7d_mean', 0.0))
+
+
 def test_engineer_computes_valve_toggle_rate(tmp_path):
     target = date(2026, 1, 8)
     events = [

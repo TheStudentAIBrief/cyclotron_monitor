@@ -232,15 +232,25 @@ def prune_events(db_path: str, keep_days: int = EVENTS_RETENTION_DAYS,
     Safety contract: if archive_dir is provided and archiving fails for any
     reason, the prune is ABORTED — we never delete data that wasn't archived.
 
+    archive_old_events() only ever archives whole calendar months strictly
+    before the cutoff month (it deliberately skips the partial cutoff month —
+    old months are immutable so re-runs can safely skip files that already
+    exist, but a still-partial month isn't safe to treat that way). Deleting
+    everything before the exact cutoff DATE would therefore silently drop the
+    unarchived partial-month days. When archiving, the delete boundary is
+    rounded back to the start of the cutoff month so nothing is ever deleted
+    that wasn't guaranteed to be archived first.
+
     Call this from the watcher after each successful refresh to maintain the
     retention window automatically.
     """
     cutoff = (datetime.now() - timedelta(days=keep_days)).strftime('%Y-%m-%d')
+    delete_cutoff = f'{cutoff[:7]}-01' if archive_dir else cutoff
 
     conn = sqlite3.connect(db_path, timeout=60)
     try:
         old = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE timestamp < ?", [cutoff]
+            "SELECT COUNT(*) FROM events WHERE timestamp < ?", [delete_cutoff]
         ).fetchone()[0]
         if old == 0:
             return 0
@@ -285,14 +295,14 @@ def prune_events(db_path: str, keep_days: int = EVENTS_RETENTION_DAYS,
             "INSERT INTO events_keep "
             "SELECT timestamp, severity, code, function, message, source_file "
             "FROM events WHERE timestamp >= ?",
-            [cutoff],
+            [delete_cutoff],
         )
         conn.execute("DROP TABLE events")
         conn.execute("ALTER TABLE events_keep RENAME TO events")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_code_ts ON events(code, timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp)")
         conn.commit()
-        _log.info('prune_events: removed %s rows older than %s', f'{old:,}', cutoff)
+        _log.info('prune_events: removed %s rows older than %s', f'{old:,}', delete_cutoff)
         return old
     finally:
         conn.close()

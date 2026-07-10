@@ -8,6 +8,7 @@ from parsers.hyper_parser import parse_hyper_file, extract_lifetime_warnings, ex
 from parsers.maintenance_labels import extract_maintenance_events
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beam_sample.log"
+BEAM_NEW_FORMAT = Path(__file__).parent / "fixtures" / "beam_new_format.log"
 HYPER_FIXTURE = Path(__file__).parent / "fixtures" / "hyper_sample.log"
 HYPER_MAINT = Path(__file__).parent / "fixtures" / "hyper_maintenance.log"
 HYPER_VALVE = Path(__file__).parent / "fixtures" / "hyper_valve_chattering.log"
@@ -47,6 +48,19 @@ def test_aggregate_daily_returns_stats():
     assert 'AI_BOP_CUR_p90' in daily.columns
     assert 'data_quality' in daily.columns
     assert len(daily) >= 1
+
+
+def test_beam_parser_handles_merged_date_time_header_format():
+    # Real format seen starting 2026-05-15: header "DATE TIME,..." (one merged column)
+    # instead of "DATE,TIME,..." (two separate columns), with each row's timestamp
+    # merged into a single field ("2026-05-15 06:18:32.0") instead of two comma-separated
+    # fields ("05/14/2026,20:59:03.3"). Before the fix this produces an empty DataFrame
+    # because the header is never recognized.
+    df = parse_beam_file(str(BEAM_NEW_FORMAT))
+    assert len(df) == 2
+    assert 'AI_IS_CUR' in df.columns
+    assert df['AI_IS_CUR'].iloc[0] == pytest.approx(0.000771)
+    assert df['timestamp'].iloc[0] == pd.Timestamp('2026-05-15 06:18:32.0')
 
 
 def test_hyper_parser_extracts_error_codes():

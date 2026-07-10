@@ -32,6 +32,7 @@ from api import config as _config  # noqa: E402
 _config.get_config.cache_clear()
 
 import api.main as main  # noqa: E402
+from api.auth import create_tokens, get_current_user  # noqa: E402
 from api.db_cloud import get_conn, init_cloud_tables  # noqa: E402
 from api.routes import scan  # noqa: E402  -- doesn't exist yet; expected import failure (TDD)
 
@@ -49,6 +50,12 @@ _ACTION_LO, _ACTION_HI = 0.2, 5.5
 # than one entry / more than one location group actually shows up.
 _GAUGE_2 = 'G-201'
 _LOCATION_2 = 'HVAC Room - Cyclotron HEPA'
+
+# GET /scan (the full-inventory index) requires a valid access token -- unlike
+# /scan/{gauge_name}, which stays deliberately unauthenticated for QR scanners.
+_INDEX_AUTH = {
+    'Authorization': f"Bearer {create_tokens('scan-index-tester', _LAB_ID)['access_token']}"
+}
 
 
 def _seed():
@@ -178,7 +185,7 @@ def test_scan_post_is_not_allowed():
 
 def test_scan_index_lists_every_real_gauge():
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     assert r.status_code == 200
     assert r.headers['content-type'].startswith('text/html')
     body = r.text
@@ -193,23 +200,52 @@ def test_scan_index_lists_every_real_gauge():
 
 def test_scan_index_uses_latest_reading_not_older_one():
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     assert '1.4' in r.text   # latest Beam on Post value
     assert 'bar' in r.text
 
 
 def test_scan_index_embeds_a_qr_image_per_gauge():
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     body = r.text
     assert f'/scan/{quote(_GAUGE)}/qr.png' in body or f'/scan/{_GAUGE}/qr.png' in body
     assert f'/scan/{_GAUGE_2}/qr.png' in body
 
 
-def test_scan_index_requires_no_authorization_header():
+def test_scan_index_requires_authorization_header():
+    """The full-inventory index (unlike a single gauge scan) discloses every
+    gauge's location and thresholds, so it must require a valid access token.
+
+    Other hardening test modules install a get_current_user bypass on this same
+    shared app instance and never remove it — pop it for the duration of this
+    test so it exercises real auth, then restore whatever was there before."""
+    prev_override = main.app.dependency_overrides.pop(get_current_user, None)
+    try:
+        with TestClient(main.app) as client:
+            r = client.get('/scan')
+        assert r.status_code == 401
+    finally:
+        if prev_override is not None:
+            main.app.dependency_overrides[get_current_user] = prev_override
+
+
+def test_scan_index_rejects_invalid_token():
+    prev_override = main.app.dependency_overrides.pop(get_current_user, None)
+    try:
+        with TestClient(main.app) as client:
+            r = client.get('/scan', headers={'Authorization': 'Bearer not-a-real-token'})
+        assert r.status_code == 401
+    finally:
+        if prev_override is not None:
+            main.app.dependency_overrides[get_current_user] = prev_override
+
+
+def test_scan_index_succeeds_with_valid_token():
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     assert r.status_code == 200
+    assert r.headers['content-type'].startswith('text/html')
 
 
 # ── GET /scan/{gauge_name}/qr.png (the QR image itself) ────────────────────
@@ -250,7 +286,7 @@ def test_scan_qr_png_unknown_gauge_returns_404():
 def test_scan_index_has_mobile_viewport_meta():
     """Without this, iOS/Android render the page zoomed-out/tiny by default."""
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in r.text
 
 
@@ -258,7 +294,7 @@ def test_scan_index_is_addable_as_a_home_screen_app():
     """iOS 'Add to Home Screen' opens full-screen (no Safari chrome) and uses
     a named, iconned entry only when these are present."""
     with TestClient(main.app) as client:
-        r = client.get('/scan')
+        r = client.get('/scan', headers=_INDEX_AUTH)
     body = r.text
     assert '<meta name="apple-mobile-web-app-capable" content="yes">' in body
     assert '<meta name="apple-mobile-web-app-title" content="Gauges">' in body

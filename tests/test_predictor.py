@@ -2,7 +2,7 @@ import sqlite3
 import pytest
 from datetime import date, timedelta
 from models.counter import get_counter_days
-from models.predictor import predict, PredictionResult
+from models.predictor import predict, PredictionResult, _alert_level
 from tests.conftest import setup_test_db, make_beam_rows
 
 
@@ -56,6 +56,61 @@ def test_predictor_plain_english_reasons_contain_no_jargon(tmp_path):
 def test_predictor_risk_score_between_0_and_1(tmp_path):
     result = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01')
     assert 0.0 <= result.risk_score <= 1.0
+
+
+def test_predictor_anomaly_score_defaults_to_none_when_not_supplied(tmp_path):
+    # Backward compatible: existing callers (backtest.py, monitor/watcher.py
+    # before this change) that don't pass anomaly_score must not break.
+    result = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01')
+    assert result.anomaly_score is None
+
+
+def test_predictor_anomaly_score_is_passed_through(tmp_path):
+    result = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01',
+                      anomaly_score=0.82)
+    assert result.anomaly_score == 0.82
+
+
+def test_alert_level_days_based_tiers_unchanged_when_risk_not_supplied():
+    # Backward compatible: existing callers that only pass days keep the
+    # exact same tier boundaries.
+    assert _alert_level(3) == 'RED'
+    assert _alert_level(7) == 'ORANGE'
+    assert _alert_level(14) == 'YELLOW'
+    assert _alert_level(15) == 'GREEN'
+
+
+def test_alert_level_high_risk_escalates_past_a_calm_days_estimate():
+    # Root cause found empirically (2026-07-03): the isotonic days-calibrator
+    # conservatively averages days-until-event over its whole risk bucket, so
+    # even a genuinely strong model_risk (standalone Spearman rho up to -0.82
+    # vs actual days, p<0.005) often calibrates to a days number >14 - which
+    # previously meant _alert_level(days) always returned GREEN no matter how
+    # confident the model was, since alert level never looked at risk at all.
+    assert _alert_level(30, risk=0.9) == 'ORANGE'
+    assert _alert_level(30, risk=0.75) == 'YELLOW'
+    assert _alert_level(30, risk=0.5) == 'GREEN'  # not confident enough to escalate
+
+
+def test_alert_level_days_based_tier_wins_when_more_urgent_than_risk_tier():
+    # A days-based RED/ORANGE/YELLOW must never be downgraded by a lower risk
+    # score - risk can only escalate, never de-escalate, a days-based alert.
+    assert _alert_level(3, risk=0.1) == 'RED'
+    assert _alert_level(7, risk=0.1) == 'ORANGE'
+
+
+def test_predictor_anomaly_score_does_not_affect_alert_level_or_days(tmp_path):
+    # By design (see models/anomaly.py docstring): this is an additive,
+    # informational signal, not a gate. A high anomaly score must never
+    # suppress or alter the existing counter/model-driven alert - the six
+    # earlier experiments showed exactly how dangerous it is for a "smarter"
+    # signal to silently override the alerting logic that gives good detection.
+    baseline = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01')
+    with_anomaly = predict('ION SOURCE', _features_stub(), str(tmp_path), 10.0, '2025-01-01',
+                            anomaly_score=0.99)
+    assert with_anomaly.alert_level == baseline.alert_level
+    assert with_anomaly.days_estimate == baseline.days_estimate
+    assert with_anomaly.risk_score == baseline.risk_score
 
 
 def _build_synthetic_db(tmp_path, n_cycles=4, cycle_len=46):

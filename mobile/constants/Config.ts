@@ -1,5 +1,9 @@
+import { Platform } from 'react-native';
+
 const Config = {
-  API_URL: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000',
+  // On web with no explicit override, default to '' (same-origin/relative fetch) since
+  // the API is served from the same domain, which is unknown at build time (e.g. Render).
+  API_URL: process.env.EXPO_PUBLIC_API_URL ?? (Platform.OS === 'web' ? '' : 'http://localhost:8000'),
   // Timeout for fast endpoints (dashboard, gauges, records).
   // 30s gives WiFi cold-start enough headroom (10s was observed to timeout on WiFi).
   // Override with EXPO_PUBLIC_API_TIMEOUT_MS.

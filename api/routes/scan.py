@@ -3,13 +3,21 @@ QR-code scan landing page — GET /scan/{gauge_name}, called by whatever scans t
 printed gauge label (phone camera, or the co-founder's separate GxP eQMS system).
 Deliberately unauthenticated (same idiom as api/routes/sync.py): no JWT, since the
 scanner has no way to log in first. Read-only.
+
+GET /scan (the index below) is different: it is not a single-gauge QR landing
+page, it enumerates the entire facility's gauge inventory/locations/thresholds
+in one response, so it requires the same JWT auth as the rest of /api/* --
+unlike an individual gauge scan, there is no "scanner with no way to log in
+first" justification for the full inventory listing.
 """
+import html
 from io import BytesIO
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
 from monitor.gauge_scan import build_qr, fetch_gauges, gauge_scan_url
@@ -23,10 +31,11 @@ def _gauges_by_name(db_path):
     return {g['gauge_name']: g for g in fetch_gauges(db_path)}
 
 
-@router.get('/scan')
+@router.get('/scan', dependencies=[Depends(get_current_user)])
 def scan_index(request: Request):
     """Website listing every logged gauge, grouped by location, each with its
-    QR code attached inline."""
+    QR code attached inline. Requires a valid access token (see module
+    docstring) -- unlike /scan/{gauge_name}, this lists the whole facility."""
     cfg = get_config()
     base_url = str(request.base_url).rstrip('/')
     gauges = sorted(fetch_gauges(cfg['db_path']), key=lambda g: (g['location'], g['gauge_name']))
@@ -36,19 +45,20 @@ def scan_index(request: Request):
     for g in gauges:
         if g['location'] != current_location:
             current_location = g['location']
-            sections.append(f'<h2>{current_location}</h2>')
+            sections.append(f'<h2>{html.escape(str(current_location))}</h2>')
         safe_name = quote(g['gauge_name'], safe='')
+        e_name = html.escape(str(g['gauge_name']))
         sections.append(f"""
 <div class="gauge">
-  <img src="/scan/{safe_name}/qr.png" width="140" height="140" alt="QR for {g['gauge_name']}">
+  <img src="/scan/{safe_name}/qr.png" width="140" height="140" alt="QR for {e_name}">
   <div>
-    <a href="/scan/{safe_name}"><strong>{g['gauge_name']}</strong></a><br>
-    {g['value']} {g['unit']} &middot; {g['timestamp']}<br>
-    alert {g['alert_lo']}&ndash;{g['alert_hi']} &middot; action {g['action_lo']}&ndash;{g['action_hi']}
+    <a href="/scan/{safe_name}"><strong>{e_name}</strong></a><br>
+    {html.escape(str(g['value']))} {html.escape(str(g['unit']))} &middot; {html.escape(str(g['timestamp']))}<br>
+    alert {html.escape(str(g['alert_lo']))}&ndash;{html.escape(str(g['alert_hi']))} &middot; action {html.escape(str(g['action_lo']))}&ndash;{html.escape(str(g['action_hi']))}
   </div>
 </div>""")
 
-    html = f"""<!DOCTYPE html>
+    page = f"""<!DOCTYPE html>
 <html>
 <head>
 <title>Gauges</title>
@@ -63,7 +73,7 @@ def scan_index(request: Request):
 {''.join(sections)}
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=page)
 
 
 @router.get('/scan/icon.png')
@@ -149,24 +159,25 @@ def scan_gauge(gauge_name: str, request: Request, format: str = Query(None)):
             'scan_url': scan_url,
         })
 
-    html = f"""<!DOCTYPE html>
+    e_name = html.escape(str(gauge_name))
+    page = f"""<!DOCTYPE html>
 <html>
 <head>
-<title>{gauge_name} — Gauge Scan</title>
+<title>{e_name} — Gauge Scan</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
-<h1>{gauge_name}</h1>
-<p>Location: {row['location']}</p>
-<p>Reading: {row['value']} {row['unit']}</p>
-<p>Timestamp: {row['timestamp']}</p>
-<p>Confidence: {row['confidence']}</p>
+<h1>{e_name}</h1>
+<p>Location: {html.escape(str(row['location']))}</p>
+<p>Reading: {html.escape(str(row['value']))} {html.escape(str(row['unit']))}</p>
+<p>Timestamp: {html.escape(str(row['timestamp']))}</p>
+<p>Confidence: {html.escape(str(row['confidence']))}</p>
 <table>
-<tr><td>Alert Lo</td><td>{row['alert_lo']}</td></tr>
-<tr><td>Alert Hi</td><td>{row['alert_hi']}</td></tr>
-<tr><td>Action Lo</td><td>{row['action_lo']}</td></tr>
-<tr><td>Action Hi</td><td>{row['action_hi']}</td></tr>
+<tr><td>Alert Lo</td><td>{html.escape(str(row['alert_lo']))}</td></tr>
+<tr><td>Alert Hi</td><td>{html.escape(str(row['alert_hi']))}</td></tr>
+<tr><td>Action Lo</td><td>{html.escape(str(row['action_lo']))}</td></tr>
+<tr><td>Action Hi</td><td>{html.escape(str(row['action_hi']))}</td></tr>
 </table>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=page)

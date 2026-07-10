@@ -12,6 +12,11 @@ def parse_beam_file(path: str) -> pd.DataFrame:
     if path.stat().st_size > _MAX_FILE_BYTES:
         raise ValueError(f"File exceeds size limit ({path.stat().st_size} bytes): {path.name}")
     cols = None
+    # False (legacy): header is "DATE,TIME,..." — two separate leading columns, rows are
+    # "MM/DD/YYYY,HH:MM:SS.f,...", date field may be blank (carries current_date forward).
+    # True (seen starting 2026-05-15): header is "DATE TIME,..." — one merged leading
+    # column, rows are "YYYY-MM-DD HH:MM:SS.f,..." with the full timestamp always present.
+    merged_timestamp = False
     current_date = None
     rows = []
 
@@ -22,6 +27,11 @@ def parse_beam_file(path: str) -> pd.DataFrame:
                 continue
             if 'DATE,TIME' in line:
                 cols = [c.strip().split(' /')[0].strip() for c in line.split(',')]
+                merged_timestamp = False
+                continue
+            if 'DATE TIME,' in line:
+                cols = [c.strip().split(' /')[0].strip() for c in line.split(',')]
+                merged_timestamp = True
                 continue
             if cols is None:
                 continue
@@ -30,29 +40,38 @@ def parse_beam_file(path: str) -> pd.DataFrame:
             if len(parts) < len(cols):
                 continue
 
-            date_field = parts[0].strip()
-            if date_field:
-                current_date = date_field
-            if current_date is None:
-                continue
-
-            try:
-                ts = pd.to_datetime(
-                    f"{current_date} {parts[1].strip()}",
-                    format='%m/%d/%Y %H:%M:%S.%f', errors='coerce'
-                )
+            if merged_timestamp:
+                ts = pd.to_datetime(parts[0].strip(), format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
                 if pd.isnull(ts):
-                    ts = pd.to_datetime(
-                        f"{current_date} {parts[1].strip()}",
-                        format='%m/%d/%Y %H:%M:%S', errors='coerce'
-                    )
+                    ts = pd.to_datetime(parts[0].strip(), format='%Y-%m-%d %H:%M:%S', errors='coerce')
                 if pd.isnull(ts):
                     continue
-            except Exception:
-                continue
+                value_start = 1
+            else:
+                date_field = parts[0].strip()
+                if date_field:
+                    current_date = date_field
+                if current_date is None:
+                    continue
+
+                try:
+                    ts = pd.to_datetime(
+                        f"{current_date} {parts[1].strip()}",
+                        format='%m/%d/%Y %H:%M:%S.%f', errors='coerce'
+                    )
+                    if pd.isnull(ts):
+                        ts = pd.to_datetime(
+                            f"{current_date} {parts[1].strip()}",
+                            format='%m/%d/%Y %H:%M:%S', errors='coerce'
+                        )
+                    if pd.isnull(ts):
+                        continue
+                except Exception:
+                    continue
+                value_start = 2
 
             row = {'timestamp': ts}
-            for i, col in enumerate(cols[2:], start=2):
+            for i, col in enumerate(cols[value_start:], start=value_start):
                 if i < len(parts):
                     try:
                         row[col] = float(parts[i])

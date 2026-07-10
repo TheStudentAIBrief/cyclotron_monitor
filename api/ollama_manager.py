@@ -74,7 +74,15 @@ def _reset_idle_timer() -> None:
 
 
 def ensure_running() -> None:
-    """Call before any Ollama inference. Starts the server if needed and resets the idle timer."""
+    """Call before any Ollama inference. Starts the server if needed and resets the idle timer.
+
+    Centralizes the OLLAMA_NEWSLETTER_ONLY restriction here (rather than in each
+    caller) so every Ollama-backed route — gauge OCR, EUR photo OCR, the AI
+    assistant — inherits the guard automatically instead of needing it re-added
+    per endpoint, which is how it previously went missing everywhere.
+    """
+    if os.environ.get("OLLAMA_NEWSLETTER_ONLY") == "1":
+        raise RuntimeError("Ollama is restricted to newsletter agents on this host")
     with _lock:
         if not _is_running():
             if not _IS_LOCAL:

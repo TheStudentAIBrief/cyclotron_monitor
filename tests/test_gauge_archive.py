@@ -91,6 +91,16 @@ def test_manifest_contains_readings_count(tmp_path):
     assert manifest[0]['readings_count'] == 3
 
 
+def test_manifest_strips_directory_traversal_from_source_file(tmp_path):
+    # MED-32 hardening: a crafted source_file (e.g. from an attacker-controlled
+    # upload filename) must not land verbatim in the NNR compliance manifest.
+    archive_dir = str(tmp_path / 'ga')
+    archive_import('../../../../etc/passwd', b'', '{}', [], archive_dir)
+    manifest = json.loads(open(os.path.join(archive_dir, MANIFEST_NAME)).read())
+    assert manifest[0]['source_file'] == 'passwd'
+    assert '..' not in manifest[0]['source_file']
+
+
 def test_manifest_appends_on_second_call(tmp_path):
     archive_dir = str(tmp_path / 'ga')
     archive_import('image0.jpg', b'', '{}', [], archive_dir)

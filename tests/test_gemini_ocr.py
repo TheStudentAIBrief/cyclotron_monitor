@@ -15,14 +15,15 @@ from api import gemini_ocr
 
 
 class FakeResponse:
-    def __init__(self, status_code, json_data=None, headers=None):
+    def __init__(self, status_code, json_data=None, headers=None, url='https://example.com'):
         self.status_code = status_code
         self._json_data = json_data or {}
         self.headers = headers or {}
+        self._url = url
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            request = httpx.Request('POST', 'https://example.com')
+            request = httpx.Request('POST', self._url)
             response = httpx.Response(self.status_code, request=request)
             raise httpx.HTTPStatusError(
                 f'{self.status_code} error', request=request, response=response,
@@ -142,6 +143,44 @@ def test_call_does_not_retry_non_transient_4xx(monkeypatch):
         gemini_ocr.call('prompt', 'aW1n', {'type': 'object'})
 
     assert len(calls) == 1
+
+
+# ── GEMINI_API_KEY must never reach the URL / exception string ─────────────
+# (regression test for the leak: httpx.HTTPStatusError.__str__ embeds the
+# request URL, and that string used to end up in client responses, server
+# logs, and permanent gauge_readings rows via api/routes/gauges.py.)
+
+def test_call_sends_api_key_via_header_not_url(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured['url'] = url
+        captured['headers'] = headers
+        return FakeResponse(200, _ok_json(), url=url)
+
+    monkeypatch.setattr(httpx, 'post', fake_post)
+
+    gemini_ocr.call('prompt', 'aW1n', {'type': 'object'})
+
+    assert 'key=' not in captured['url']
+    assert 'test-key' not in captured['url']
+    assert captured['headers']['x-goog-api-key'] == 'test-key'
+
+
+def test_call_error_message_never_contains_the_api_key(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured['url'] = url
+        return FakeResponse(400, url=url)   # non-transient -> raises immediately
+
+    monkeypatch.setattr(httpx, 'post', fake_post)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        gemini_ocr.call('prompt', 'aW1n', {'type': 'object'})
+
+    assert 'test-key' not in str(exc_info.value)
+    assert 'test-key' not in captured['url']
 
 
 def test_call_retries_on_5xx_transient_error(monkeypatch):

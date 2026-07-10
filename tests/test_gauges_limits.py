@@ -35,6 +35,12 @@ def test_oversized_request_body_is_rejected(monkeypatch):
 
 
 def test_eur_photos_rejects_oversized_batch():
+    # Re-affirm at run-time (not just at import): a sibling test module collected
+    # later (e.g. test_scan_endpoint.py) clears this override during its own
+    # collection-time setup, and pytest finishes collecting every file before any
+    # test actually runs -- so the module-level assignment above isn't reliably
+    # still in effect by the time this test body executes.
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
     with TestClient(main.app) as client:
         payload = {'photos_b64': ['eHg='] * (_MAX_EUR_PHOTOS + 1), 'filenames': []}
         r = client.post('/api/gauges/eur-photos', json=payload)

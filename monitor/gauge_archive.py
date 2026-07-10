@@ -100,9 +100,12 @@ def archive_import(
         except (FileNotFoundError, json.JSONDecodeError):
             existing = []
 
+        # Strip any directory-traversal components before this lands in the NNR
+        # audit manifest — mirrors the safe_stem sanitization already applied to
+        # the on-disk entry_dir name, just without also dropping the extension.
         existing.append({
             'archived_at':    ts,
-            'source_file':    source_file,
+            'source_file':    os.path.basename(source_file),
             'entry_dir':      entry_name,
             'readings_count': len(parsed_readings),
         })

@@ -99,10 +99,15 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
             'maxOutputTokens': 1024,   # avoid mid-JSON truncation
         },
     }
-    url = f'{_BASE}/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}'
+    # Key goes in a header, not the URL query string: httpx.HTTPStatusError stringifies
+    # to include the full request URL, and that string ends up in client-facing error
+    # responses and persisted DB rows via api/routes/gauges.py's error handling -- a
+    # `?key=...` URL would leak the live key on every transient Gemini failure.
+    url = f'{_BASE}/{GEMINI_MODEL}:generateContent'
+    headers = {'x-goog-api-key': GEMINI_API_KEY}
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
-        r = httpx.post(url, json=payload, timeout=timeout)
+        r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError:

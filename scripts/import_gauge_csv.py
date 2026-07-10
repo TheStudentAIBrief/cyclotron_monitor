@@ -7,11 +7,15 @@ Usage (run on any machine that can reach the API):
 The script logs in, uploads the CSV to POST /api/gauges/import-csv, and
 prints how many rows were inserted plus any row-level errors.
 """
+import os
 import sys
 import pathlib
 import requests
 
-API = "http://192.168.4.46:8000"
+# start_dev.ps1 can start the API with TLS enabled (uvicorn --ssl-keyfile/--ssl-certfile
+# on this same port), in which case it's only reachable over https — this constant can't
+# know which mode is currently running, so it's overridable rather than hardcoded https.
+API = os.environ.get("PETLAB_API_URL", "http://192.168.4.46:8000")
 
 
 def main():

@@ -33,7 +33,7 @@ function SelectorScreen({ onSelect }: { onSelect: (v: 'main' | 'petrace') => voi
           <Ionicons name="pulse" size={32} color={Colors.primary} />
         </View>
         <View style={sel.textWrap}>
-          <Text style={sel.cardTitle}>IBA Cyclone 18/9</Text>
+          <Text style={sel.cardTitle}>Siemens</Text>
           <Text style={sel.cardDesc}>ML maintenance predictions · beam log analysis</Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color="#555" />
@@ -146,11 +146,13 @@ function DashboardView({
   title,
   subtitle,
   onBack,
+  showFacilityWidgets = true,
 }: {
   fetchFn: () => Promise<DashboardData>;
   title: string;
   subtitle: string;
   onBack: () => void;
+  showFacilityWidgets?: boolean;
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -245,8 +247,12 @@ function DashboardView({
               <Text style={dash.generatedAt}>
                 As of {new Date(data.generated_at).toLocaleString()}
               </Text>
-              <BeamTrendCard rows={data.beam_trend ?? []} />
-              <GaugeHistoryCard rows={data.gauge_history ?? []} />
+              {showFacilityWidgets && (
+                <>
+                  <BeamTrendCard rows={data.beam_trend ?? []} />
+                  <GaugeHistoryCard rows={data.gauge_history ?? []} />
+                </>
+              )}
             </View>
           ) : null
         }
@@ -308,7 +314,7 @@ export default function DashboardScreen() {
     return (
       <DashboardView
         fetchFn={getDashboard}
-        title="IBA Cyclone 18/9"
+        title="Siemens"
         subtitle="ML maintenance predictions"
         onBack={() => setView(null)}
       />
@@ -322,6 +328,7 @@ export default function DashboardScreen() {
         title="PETrace 800"
         subtitle="Foil life · beam current · RF & vacuum"
         onBack={() => setView(null)}
+        showFacilityWidgets={false}
       />
     );
   }
