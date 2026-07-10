@@ -146,11 +146,13 @@ function DashboardView({
   title,
   subtitle,
   onBack,
+  showFacilityWidgets = true,
 }: {
   fetchFn: () => Promise<DashboardData>;
   title: string;
   subtitle: string;
   onBack: () => void;
+  showFacilityWidgets?: boolean;
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -245,8 +247,12 @@ function DashboardView({
               <Text style={dash.generatedAt}>
                 As of {new Date(data.generated_at).toLocaleString()}
               </Text>
-              <BeamTrendCard rows={data.beam_trend ?? []} />
-              <GaugeHistoryCard rows={data.gauge_history ?? []} />
+              {showFacilityWidgets && (
+                <>
+                  <BeamTrendCard rows={data.beam_trend ?? []} />
+                  <GaugeHistoryCard rows={data.gauge_history ?? []} />
+                </>
+              )}
             </View>
           ) : null
         }
@@ -322,6 +328,7 @@ export default function DashboardScreen() {
         title="PETrace 800"
         subtitle="Foil life · beam current · RF & vacuum"
         onBack={() => setView(null)}
+        showFacilityWidgets={false}
       />
     );
   }
