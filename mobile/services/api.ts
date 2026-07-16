@@ -12,12 +12,15 @@ export interface ComponentData {
   last_maintenance: string | null;
   top_reasons: string[];
   counter_days: number | null;
-  primary_signal: 'COUNTER' | 'MODEL' | 'BOTH' | 'COUNTER_ONLY';
+  primary_signal: 'COUNTER' | 'MODEL' | 'BOTH' | 'COUNTER_ONLY' | 'MODEL_OVERRIDE';
   risk_score: number;
   warning: string | null;
   trained_at: string | null;
   model_age_days: number | null;
   component_type?: 'wear' | 'performance';
+  // The ML model's own read, before blending with the calendar counter.
+  model_days_estimate?: number | null;
+  model_risk?: number | null;
 }
 
 export interface DashboardData {

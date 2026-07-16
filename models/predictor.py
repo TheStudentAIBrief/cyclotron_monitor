@@ -92,6 +92,11 @@ class PredictionResult:
     # experiments showed how dangerous it is for a "smarter" signal to
     # silently override the alerting logic that gives good detection.
     anomaly_score: float = None
+    # The ML model's OWN read, before it is blended with the calendar counter.
+    # Surfaced so the operator can see how close and how confident the model is,
+    # not just the final RED/GREEN. None for counter-only components (no model).
+    model_days_estimate: float = None
+    model_risk: float = None
 
 
 def _alert_level(days: float, risk: float = None) -> str:
@@ -279,4 +284,6 @@ def predict(component: str, features: dict, model_dir: str,
         warning=model_warning,
         trained_at=model_trained_at,
         anomaly_score=anomaly_score,
+        model_days_estimate=round(model_days, 1),
+        model_risk=round(model_risk, 3),
     )

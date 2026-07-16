@@ -49,6 +49,8 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
             'warning': getattr(pred, 'warning', None),
             'trained_at': trained_at,
             'model_age_days': model_age_days,
+            'model_days_estimate': getattr(pred, 'model_days_estimate', None),
+            'model_risk': getattr(pred, 'model_risk', None),
         })
 
         if pred.alert_level in ('RED', 'ORANGE'):

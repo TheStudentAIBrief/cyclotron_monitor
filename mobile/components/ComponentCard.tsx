@@ -9,6 +9,17 @@ const LEVEL_BAR: Record<string, string> = {
   GREEN: '#2ecc71',
 };
 
+// Plain-English confidence bands for the model's own risk score, so the operator
+// reads how sure the model is — not a bare probability. Highest band first.
+const MODEL_CONF = [
+  { min: 0.7, label: 'high concern', color: '#e74c3c' },
+  { min: 0.4, label: 'elevated', color: '#e67e22' },
+  { min: 0.25, label: 'watch', color: '#f39c12' },
+  { min: 0, label: 'confident healthy', color: '#2ecc71' },
+];
+const modelConfidence = (risk: number) =>
+  MODEL_CONF.find((c) => risk >= c.min) ?? MODEL_CONF[MODEL_CONF.length - 1];
+
 export default function ComponentCard({ data }: { data: ComponentData }) {
   const barColor = LEVEL_BAR[data.alert_level] ?? '#2ecc71';
   const pct = Math.min(100, Math.max(0, data.pct_life_used ?? 0));
@@ -25,6 +36,12 @@ export default function ComponentCard({ data }: { data: ComponentData }) {
     if (data.alert_level === 'GREEN') return 'Stable';
     return 'No trend data';
   })();
+
+  // The model's own read (independent of the calendar counter), shown so the
+  // operator can see how close and how confident the model is behind the alert.
+  const hasModelRead = data.model_days_estimate != null && data.model_risk != null;
+  const conf = hasModelRead ? modelConfidence(data.model_risk as number) : null;
+  const isOverride = data.primary_signal === 'MODEL_OVERRIDE';
 
   return (
     <View style={[styles.card, { borderLeftColor: barColor }]}>
@@ -63,6 +80,25 @@ export default function ComponentCard({ data }: { data: ComponentData }) {
           <Text style={styles.signalText}>{data.primary_signal ?? '—'}</Text>
         </View>
       </View>
+
+      {/* Model's own read — how close and how confident the ML model is */}
+      {hasModelRead && conf && (
+        <View style={styles.row}>
+          <Text style={styles.label}>Model read</Text>
+          <Text style={[styles.value, { color: conf.color }]}>
+            ~{Math.round(data.model_days_estimate as number)} d · {conf.label}
+          </Text>
+        </View>
+      )}
+
+      {/* Model stood the calendar alarm down */}
+      {isOverride && (
+        <View style={styles.overrideBox}>
+          <Text style={styles.overrideText}>
+            Model stood down the calendar alarm — confident this component is healthy.
+          </Text>
+        </View>
+      )}
 
       {/* Top reasons */}
       {data.top_reasons?.length > 0 && (
@@ -139,6 +175,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   warningText: { color: '#ffb347', fontSize: 12 },
+  overrideBox: {
+    backgroundColor: '#0e2a1a',
+    borderRadius: 5,
+    padding: 8,
+    marginTop: 10,
+  },
+  overrideText: { color: '#5fd39a', fontSize: 12 },
   staleBox: {
     backgroundColor: '#3a2800',
     borderRadius: 5,
