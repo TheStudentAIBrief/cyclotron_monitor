@@ -50,6 +50,13 @@ MIN_READINGS = {7: 3, 14: 5, 30: 7}
 PETRACE_COLS = ('total_muAh', 'rf_efficiency')
 PETRACE_MIN_READINGS = {7: 1, 14: 2, 30: 3}
 
+# Human-contact / machine-struggle categories mined from the full 30M-event log
+# (operator commands, resets, tuning/calibration, interlock aborts, comms
+# timeouts, excess-power, ISC clamping, standby/shutdown). Counted per window from
+# a precomputed daily_category table — see build_features. Additive; 0 when absent.
+HUMACT_CATEGORIES = ('struggle', 'power_state', 'operator_cmd', 'interlock',
+                     'mode_change', 'service_manual', 'reset', 'tune_adjust')
+
 
 def _slope(values):
     if len(values) < 2:
@@ -227,6 +234,25 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
                 [start14, target_date.isoformat()]
             ).fetchone()[0]
         features['fault_11001_14d'] = int(cnt11001)
+
+        # Human-contact / machine-struggle category features: operator actions
+        # (commands, resets, calibration, tuning) and the machine working harder
+        # as parts wear (comms timeouts, excess power, ISC clamping, interlock
+        # aborts, standby/shutdown). Read from a precomputed daily_category table
+        # (aggregated from the full event log) when present; absent (e.g. a live DB
+        # without the aggregation, or a test fixture) -> 0, purely additive.
+        for w in (7, 14):
+            cstart = (target_date - timedelta(days=w)).isoformat()
+            for cat in HUMACT_CATEGORIES:
+                try:
+                    n = conn.execute(
+                        "SELECT COALESCE(SUM(count),0) FROM daily_category "
+                        "WHERE category=? AND date>=? AND date<?",
+                        [cat, cstart, target_date.isoformat()]
+                    ).fetchone()[0]
+                except sqlite3.OperationalError:
+                    n = 0
+                features[f'humact_{cat}_{w}d'] = int(n)
 
         last_maint = _last_maintenance_date(conn, component, before=target_date)
         days_since = (target_date - date.fromisoformat(last_maint)).days if last_maint else None

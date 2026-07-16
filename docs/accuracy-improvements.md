@@ -59,6 +59,25 @@ its OOF-isotonic calibration is what sharpens the override's gate). Promote it t
 as a **separate, reviewed** change (it alters the training pipeline, so it deserves its own
 PR + backtest), then re-run Rung 2's retrain. Do not bundle it into the override PR.
 
+## Rung 4 — human-contact features (mined from the full 31M-event log)
+The models only ever saw fault codes. Mining every event surfaced that **operator actions**
+(commands, resets, tuning/calibration) and **machine-struggle telemetry** (comms timeouts,
+excess-power, ISC-clamping, interlock aborts, standby/shutdown) rise before maintenance and were
+100% ignored. Added 8 category window-count features (`humact_*`, `features/engineer.py`), read
+from a precomputed `daily_category` table. Walk-forward result: **false alarms 41%→36%, strict
+detection 76%→78%, loose detection held 96%, 0 events lost** — applied to all components except
+BL2 (its 8 events overfit the extra features and it lost one real event; excluded).
+
+To make it work live you must **populate `daily_category`** — run
+`python scripts/aggregate_daily_categories.py --db <db>` alongside the beam_daily aggregation
+(inference needs only the last ~14 days, within retention; verified to reproduce the training
+counts exactly). Training uses the full restored history. Then retrain (Rung 2/3) — the models
+must be retrained with the features present to use them.
+
+Finer physics-grounded signals (isc-clamp, comms-timeout, isc-raise at full resolution) were
+tested and gave **no gain** over the coarse categories — the ceiling for count-based features on
+54 maintenance events. Further accuracy needs more events or higher-resolution sensor values.
+
 ## What was deliberately left out
 Cycle-constant recalibration (Ion 46→59, BL2 56→73): evaluated, improves MAE but carries its
 own ~2pp detection tradeoff and the override already does the work. Excluded to avoid trading
