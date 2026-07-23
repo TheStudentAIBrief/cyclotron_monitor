@@ -34,6 +34,14 @@ services:
         sync: false
       - key: GEMINI_OCR_MODEL
         value: gemini-2.0-flash
+      # DATA-EGRESS OPT-IN (default OFF). Setting GEMINI_API_KEY alone no longer
+      # sends anything to Google: gauge/EUR photos (operational readings, operator
+      # initials, dates) only leave the facility when ALLOW_CLOUD_OCR is explicitly
+      # set to "1" in the dashboard. For an NNR-regulated facility this is a
+      # deliberate data-residency policy decision — leave it unset unless cloud
+      # OCR has been signed off.
+      - key: ALLOW_CLOUD_OCR
+        sync: false
     disk:
       name: petlab-data
       mountPath: /data

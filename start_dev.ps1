@@ -4,7 +4,8 @@
 # Run as Administrator on first use (needed to add firewall rules once).
 
 param(
-    [string]$ForceIP = ""   # override auto-detection: .\start_dev.ps1 -ForceIP 10.0.0.5
+    [string]$ForceIP = "",   # override auto-detection: .\start_dev.ps1 -ForceIP 10.0.0.5
+    [switch]$EnableTLS       # terminate TLS directly on the FastAPI backend (CRIT-02 hardening)
 )
 
 $root = $PSScriptRoot
@@ -44,7 +45,32 @@ if ($ForceIP) {
     }
 }
 
-$apiUrl  = "http://${ip}:8000"
+$apiScheme = "http"
+$tlsArgs = ""
+if ($EnableTLS) {
+    # IMPORTANT: this terminates TLS on the FastAPI backend itself, but the phone
+    # currently connects via the Expo Go app from the App/Play Store, which has no
+    # way to trust a self-signed certificate (there's no app-level config -- that
+    # only takes effect in a custom EAS-built binary, which this project doesn't
+    # have yet). Until an EAS build exists, -EnableTLS is useful for testing the
+    # API directly (curl, Postman, a browser accepting the cert warning) but the
+    # mobile app itself will fail to connect over https until then -- expect that,
+    # don't treat it as a bug. Regenerate a cert covering the *current* WiFi IP
+    # every run, mirroring how QR labels are already regenerated for it below.
+    Write-Host "[TLS] Regenerating self-signed cert for $ip ..."
+    python (Join-Path $root "setup_tls.py") --ip $ip --yes
+    $certPath = Join-Path $root "data\tls\cert.pem"
+    $keyPath  = Join-Path $root "data\tls\key.pem"
+    if ((Test-Path $certPath) -and (Test-Path $keyPath)) {
+        $apiScheme = "https"
+        $tlsArgs = "--ssl-keyfile `"$keyPath`" --ssl-certfile `"$certPath`""
+        Write-Host "[TLS] Enabled. Mobile app (Expo Go) will NOT trust this cert yet -- see note above."
+    } else {
+        Write-Warning "[TLS] Cert generation failed -- falling back to plain HTTP."
+    }
+}
+
+$apiUrl  = "${apiScheme}://${ip}:8000"
 $metroUrl = "exp://${ip}:8082"
 
 # ── 2. Write mobile/.env ────────────────────────────────────────────────────
@@ -84,7 +110,7 @@ Write-Host "[SVC] Starting FastAPI..."
 # and render.yaml sets its own env) — but start_dev.ps1 only ever runs for local dev,
 # so it's safe to hardcode the on-prem model here for the spawned FastAPI window.
 $env:GAUGE_OLLAMA_MODEL = 'qwen2.5vl:7b'
-Start-Process cmd -ArgumentList "/k `"cd /d `"$root`" && python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload`""
+Start-Process cmd -ArgumentList "/k `"cd /d `"$root`" && python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload $tlsArgs`""
 
 Start-Sleep -Seconds 2   # let uvicorn bind before Metro prints the QR
 

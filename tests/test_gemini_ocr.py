@@ -43,6 +43,9 @@ def _ensure_gemini_key(monkeypatch):
     # can load (via api.main) before this file's os.environ.setdefault runs, leaving
     # the module global empty. Set it directly so these retry tests are order-independent.
     monkeypatch.setattr(gemini_ocr, 'GEMINI_API_KEY', 'test-key')
+    # These tests exercise call()'s retry/parsing behaviour itself, so grant the
+    # explicit cloud-egress opt-in (default-off; see tests/test_cloud_ocr_optin.py).
+    monkeypatch.setattr(gemini_ocr, 'ALLOW_CLOUD_OCR', True)
 
 
 def test_call_retries_on_429_then_succeeds(monkeypatch):

@@ -2,19 +2,25 @@
 Generate a self-signed TLS certificate for the cyclotron dashboard server.
 
 Usage:
-    python setup_tls.py
+    python setup_tls.py                    # interactive, localhost-only (original behaviour)
+    python setup_tls.py --ip 192.168.4.46 --yes   # non-interactive, also covers a facility-WiFi IP
 
 Creates data/tls/cert.pem and data/tls/key.pem.
 After running, 'python main.py serve' will automatically enable HTTPS on port 8443.
+With --ip, start_dev.ps1's -EnableTLS switch can also terminate TLS on the FastAPI
+backend (api/main.py) directly at that address -- see start_dev.ps1's own comments
+for the important caveat about Expo Go not being able to trust this certificate.
 
 Certificate: RSA-4096, SHA-256, 10-year validity, CN=cyclotron-monitor
-Subject Alternative Names: DNS:localhost, IP:127.0.0.1
+Subject Alternative Names: DNS:localhost, IP:127.0.0.1, plus --ip if given
 
 IMPORTANT: This is a self-signed certificate.
   - Browsers will show a security warning — this is expected for internal tools.
   - Add the cert to your local trust store to suppress the warning.
-  - The certificate binds to 127.0.0.1 only; it cannot be used for remote access.
+  - Without --ip, the certificate binds to 127.0.0.1 only; it cannot be used for
+    remote access (e.g. the mobile app connecting over facility WiFi).
 """
+import argparse
 import datetime
 import ipaddress
 import subprocess
@@ -46,9 +52,11 @@ def _find_openssl() -> str | None:
     return None
 
 
-def _gen_with_openssl(openssl: str):
+def _gen_with_openssl(openssl: str, extra_ip: str | None):
     subj = '/CN=cyclotron-monitor/O=PET Labs Cyclotron Monitor/C=ZA'
     san  = 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+    if extra_ip:
+        san += f',IP:{extra_ip}'
     cmd  = [
         openssl, 'req', '-x509', '-newkey', 'rsa:4096',
         '-keyout', str(_KEY), '-out', str(_CERT),
@@ -61,7 +69,7 @@ def _gen_with_openssl(openssl: str):
         raise RuntimeError(f'openssl failed:\n{r.stderr}')
 
 
-def _gen_with_cryptography():
+def _gen_with_cryptography(extra_ip: str | None):
     """Fallback: use the 'cryptography' package if openssl is not available."""
     try:
         from cryptography import x509
@@ -85,6 +93,12 @@ def _gen_with_cryptography():
         x509.NameAttribute(NameOID.COMMON_NAME, 'cyclotron-monitor'),
     ])
     now = datetime.datetime.now(datetime.timezone.utc)
+    san_entries = [
+        x509.DNSName('localhost'),
+        x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
+    ]
+    if extra_ip:
+        san_entries.append(x509.IPAddress(ipaddress.IPv4Address(extra_ip)))
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -93,13 +107,7 @@ def _gen_with_cryptography():
         .serial_number(x509.random_serial_number())
         .not_valid_before(now)
         .not_valid_after(now + datetime.timedelta(days=3650))
-        .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName('localhost'),
-                x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
-            ]),
-            critical=False,
-        )
+        .add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
         .sign(key, hashes.SHA256())
     )
 
@@ -114,10 +122,15 @@ def _gen_with_cryptography():
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ip', default=None, help='Additional IP (e.g. current WiFi IP) to add as a SAN.')
+    parser.add_argument('--yes', action='store_true', help='Overwrite an existing cert without prompting.')
+    args = parser.parse_args()
+
     print('Cyclotron Dashboard — TLS Certificate Setup')
     print('=' * 44)
 
-    if _CERT.exists() and _KEY.exists():
+    if _CERT.exists() and _KEY.exists() and not args.yes:
         ans = input(f'Certificate already exists at {_TLS_DIR}\nOverwrite? [y/N] ').strip().lower()
         if ans != 'y':
             print('Aborted.')
@@ -128,13 +141,15 @@ def main():
     openssl = _find_openssl()
     if openssl:
         print(f'Using openssl: {openssl}')
-        _gen_with_openssl(openssl)
+        _gen_with_openssl(openssl, args.ip)
     else:
         print('openssl not found — trying cryptography package ...')
-        _gen_with_cryptography()
+        _gen_with_cryptography(args.ip)
 
     print(f'\nCertificate: {_CERT}')
     print(f'Private key: {_KEY}')
+    if args.ip:
+        print(f'SAN includes: localhost, 127.0.0.1, {args.ip}')
     print('\nStart the server with: python main.py serve')
     print('The server will listen on https://127.0.0.1:8443/')
     print('\nNOTE: Your browser will warn about the self-signed certificate.')

@@ -37,6 +37,10 @@ def test_start_passes_no_creationflags_on_posix(monkeypatch):
 
 def test_ensure_running_raises_runtimeerror_not_valueerror(monkeypatch):
     import api.ollama_manager as om
+    # This machine has OLLAMA_NEWSLETTER_ONLY=1 set as a real Windows env var —
+    # isolate this test from that ambient state so it exercises the spawn-failure
+    # path it's actually named for, not the (also-real) newsletter-only guard.
+    monkeypatch.delenv('OLLAMA_NEWSLETTER_ONLY', raising=False)
     monkeypatch.setattr(om, '_is_running', lambda: False)
     monkeypatch.setattr(om, '_IS_LOCAL', True)
     monkeypatch.setattr(om.subprocess, 'Popen', _raise_fnf)
@@ -46,11 +50,25 @@ def test_ensure_running_raises_runtimeerror_not_valueerror(monkeypatch):
 
 def test_ensure_running_remote_host_never_spawns(monkeypatch):
     import api.ollama_manager as om
+    monkeypatch.delenv('OLLAMA_NEWSLETTER_ONLY', raising=False)
     monkeypatch.setattr(om, '_is_running', lambda: False)
     monkeypatch.setattr(om, '_IS_LOCAL', False)
     called = {'popen': False}
     monkeypatch.setattr(om.subprocess, 'Popen', lambda *a, **k: called.update(popen=True))
     with pytest.raises(RuntimeError, match='not reachable'):
+        om.ensure_running()
+    assert called['popen'] is False
+
+
+def test_ensure_running_refuses_when_newsletter_only_guard_set(monkeypatch):
+    # MED-25 hardening: the guard is now centralized here so every caller
+    # (gauge OCR, EUR photo OCR, the AI assistant) inherits it, instead of each
+    # endpoint needing to re-implement the check (which is how it went missing).
+    import api.ollama_manager as om
+    monkeypatch.setenv('OLLAMA_NEWSLETTER_ONLY', '1')
+    called = {'popen': False}
+    monkeypatch.setattr(om.subprocess, 'Popen', lambda *a, **k: called.update(popen=True))
+    with pytest.raises(RuntimeError, match='newsletter'):
         om.ensure_running()
     assert called['popen'] is False
 
@@ -71,6 +89,7 @@ class _Resp:
 def test_gemini_extracts_text_on_success(monkeypatch):
     import api.gemini_ocr as g
     monkeypatch.setattr(g, 'GEMINI_API_KEY', 'k')
+    monkeypatch.setattr(g, 'ALLOW_CLOUD_OCR', True)   # explicit egress opt-in (default off)
     monkeypatch.setattr(g.httpx, 'post', lambda *a, **k: _Resp(
         {'candidates': [{'content': {'parts': [{'text': '{"is_gauge": true}'}]}}]}))
     assert g.call('prompt', '/9j/x', {'type': 'object'}) == '{"is_gauge": true}'
@@ -79,6 +98,7 @@ def test_gemini_extracts_text_on_success(monkeypatch):
 def test_gemini_raises_on_safety_block(monkeypatch):
     import api.gemini_ocr as g
     monkeypatch.setattr(g, 'GEMINI_API_KEY', 'k')
+    monkeypatch.setattr(g, 'ALLOW_CLOUD_OCR', True)   # explicit egress opt-in (default off)
     monkeypatch.setattr(g.httpx, 'post', lambda *a, **k: _Resp(
         {'candidates': [], 'promptFeedback': {'blockReason': 'SAFETY'}}))
     with pytest.raises(RuntimeError):

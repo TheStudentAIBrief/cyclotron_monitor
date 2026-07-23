@@ -8,7 +8,16 @@ a local 7B model.
 
 Setup: get a free API key at https://aistudio.google.com/app/apikey
 (no credit card — free tier is 1 500 req/day, 15 req/min).
-Set GEMINI_API_KEY in your environment, then restart the API server.
+Set GEMINI_API_KEY *and* ALLOW_CLOUD_OCR=1 in your environment, then restart
+the API server.
+
+DATA-EGRESS POLICY: every call() ships the full photo (base64) plus the domain
+prompt to Google's US cloud. For an NNR-regulated facility with air-gap /
+data-residency expectations that must be a deliberate, documented decision —
+not a side effect of an API key being present. Cloud OCR is therefore gated
+behind the explicit, default-OFF ALLOW_CLOUD_OCR flag; without it, OCR uses
+the on-prem Ollama model only (GAUGE_OLLAMA_MODEL) and nothing leaves the
+facility.
 """
 import os
 import random
@@ -16,9 +25,16 @@ import time
 
 import httpx
 
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-GEMINI_MODEL   = os.environ.get('GEMINI_OCR_MODEL', 'gemini-2.0-flash')
-_BASE          = 'https://generativelanguage.googleapis.com/v1beta/models'
+
+def _flag(name: str) -> bool:
+    """Explicit truthy env flag ('1'/'true'/'yes'/'on') — presence alone is not consent."""
+    return os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+GEMINI_API_KEY  = os.environ.get('GEMINI_API_KEY', '')
+GEMINI_MODEL    = os.environ.get('GEMINI_OCR_MODEL', 'gemini-2.0-flash')
+ALLOW_CLOUD_OCR = _flag('ALLOW_CLOUD_OCR')   # see DATA-EGRESS POLICY in the module docstring
+_BASE           = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 _MAX_ATTEMPTS      = 4
 _BASE_DELAY        = 2
@@ -30,7 +46,9 @@ _sleep = time.sleep
 
 
 def is_configured() -> bool:
-    return bool(GEMINI_API_KEY)
+    # Both are required: the key alone must never be enough to start sending
+    # facility photos to a third-party US cloud (data-egress opt-in, default off).
+    return ALLOW_CLOUD_OCR and bool(GEMINI_API_KEY)
 
 
 def _mime(b64: str) -> str:
@@ -77,11 +95,20 @@ def call(prompt: str, image_b64: str, schema: dict, timeout: int = 60) -> str:
     """
     Send a vision prompt + image to Gemini. Returns the raw JSON response string.
 
-    Raises RuntimeError if GEMINI_API_KEY is not set or the response carries no
-    usable content (safety block / recitation / truncation).
+    Raises RuntimeError if the ALLOW_CLOUD_OCR egress opt-in or GEMINI_API_KEY
+    is not set, or the response carries no usable content (safety block /
+    recitation / truncation).
     Raises httpx.HTTPStatusError on non-transient API failures.
     Retries transient 429/5xx with exponential backoff (honors Retry-After).
     """
+    if not ALLOW_CLOUD_OCR:
+        # Defense in depth: is_configured() already gates every current caller,
+        # but refuse here too so no code path can ever ship a facility image to
+        # Google without the explicit opt-in.
+        raise RuntimeError(
+            'Cloud OCR is disabled: set ALLOW_CLOUD_OCR=1 to explicitly permit '
+            'sending facility images to Google Gemini (data leaves the facility).'
+        )
     if not GEMINI_API_KEY:
         raise RuntimeError('GEMINI_API_KEY is not set')
 
