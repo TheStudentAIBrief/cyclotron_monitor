@@ -44,3 +44,7 @@ qr_labels/
 *.pyc
 __pycache__/
 .pytest_cache/
+
+# Analysis scratch (contains OT-derived feature data — never commit)
+scratchpad_bn/
+.coverage
