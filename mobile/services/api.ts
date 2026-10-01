@@ -135,13 +135,16 @@ async function request<T>(path: string, options: RequestInit = {}, timeout = Con
     }
   }
 
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     // Refresh failed, or there was never a usable token — force re-login
     // instead of surfacing a raw status. The retry above is not re-handled,
     // so this cannot infinite-loop.
     await logout();
     throw new Error('Session expired. Please log in again.');
   }
+  // A 403 is NOT handled above on purpose: it means this account's role isn't
+  // allowed to do this (see api/auth.py's require_role), so the session is
+  // still good — fall through and show the server's reason instead.
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { detail?: string };

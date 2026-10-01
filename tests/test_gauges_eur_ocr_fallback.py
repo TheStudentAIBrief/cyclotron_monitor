@@ -30,7 +30,7 @@ from api.auth import get_current_user  # noqa: E402
 from api.routes import gauges  # noqa: E402
 from api import gemini_ocr  # noqa: E402
 
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 _FAKE_PHOTO_B64 = base64.b64encode(b'not a real jpeg, just test bytes').decode()
 

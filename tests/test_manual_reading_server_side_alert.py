@@ -20,7 +20,7 @@ _LAB_ID = 'petlabs-pretoria'
 
 def _client(db_path):
     init_cloud_tables(db_path)
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': _LAB_ID}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': _LAB_ID, 'role': 'admin'}
     return TestClient(main.app)
 
 

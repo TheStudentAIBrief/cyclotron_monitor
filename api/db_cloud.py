@@ -1,5 +1,9 @@
 import sqlite3
 
+from api import audit
+
+_ADD_AUDIT_HASH = "ALTER TABLE audit_log ADD COLUMN hash TEXT"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS gauge_readings (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,7 +112,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action TEXT NOT NULL,
     lab_id TEXT,
     actor  TEXT,
-    detail TEXT
+    detail TEXT,
+    -- Hash chain (api/audit.py): each entry hashes its own content plus the
+    -- previous entry's hash, so an edit or a removal is detectable. NULL on
+    -- entries written before the chain existed.
+    prev_hash TEXT,
+    hash      TEXT
 );
 
 -- JWT revocation list. A token's jti lands here on explicit logout, letting
@@ -118,6 +127,23 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
     jti        TEXT PRIMARY KEY,
     expires_at TEXT NOT NULL,
     revoked_at TEXT NOT NULL
+);
+
+-- Per-person accounts with a role (viewer < operator < admin; see api/auth.py's
+-- require_role). The original single login in data/.credentials.json is NOT
+-- stored here -- it stays as a built-in admin so this table being empty (every
+-- deploy before RBAC existed) can never lock the lab out.
+CREATE TABLE IF NOT EXISTS users (
+    username      TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL,
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    -- Baked into each token; bumped on password reset / enable / disable so
+    -- older tokens stop working. Starts at 1 so a per-person token can never be
+    -- mistaken for the built-in admin's (always 0).
+    token_version INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    created_by    TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -139,6 +165,12 @@ _MIGRATIONS = [
     "ALTER TABLE maintenance_events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
     "ALTER TABLE predictions ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
     "ALTER TABLE events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
+    # For any database whose users table predates token_version (dev/test DBs
+    # created while RBAC was being built).
+    "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1",
+    # Existing deployments: audit_log predates the hash chain (api/audit.py).
+    "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT",
+    _ADD_AUDIT_HASH,
 ]
 
 _POST_MIGRATION_INDEXES = [
@@ -153,15 +185,27 @@ def init_cloud_tables(db_path: str) -> None:
     conn.execute("PRAGMA journal_mode=WAL")     # readers don't block on writers
     conn.execute("PRAGMA secure_delete=ON")     # zero freed pages on delete
     conn.executescript(_SCHEMA)
-    for sql in _MIGRATIONS:
-        try:
-            conn.execute(sql)
-        except sqlite3.OperationalError:
-            pass  # column already exists
-    for sql in _POST_MIGRATION_INDEXES:
-        conn.execute(sql)  # index creation is idempotent regardless of column history
-    conn.commit()
-    conn.close()
+    # One transaction for every migration below, so a start-up that dies part-way
+    # leaves nothing behind and the next one retries from scratch. Without it each
+    # ALTER commits by itself -- and a hash column added without the existing
+    # entries being chained would be skipped ("column already exists") forever.
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        for sql in _MIGRATIONS:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                continue  # column already exists
+            if sql == _ADD_AUDIT_HASH:
+                # This is the one start-up on which the hash column appears, so chain
+                # the entries that already exist now. Doing it only here means a log
+                # whose hashes are later blanked is never quietly re-chained.
+                audit.chain_existing(conn)
+        for sql in _POST_MIGRATION_INDEXES:
+            conn.execute(sql)  # index creation is idempotent regardless of column history
+        conn.commit()
+    finally:
+        conn.close()   # closing without a commit rolls the migrations back
 
 
 def get_conn(db_path: str) -> sqlite3.Connection:

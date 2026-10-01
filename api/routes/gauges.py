@@ -14,8 +14,8 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from api import gemini_ocr
-from api.auth import get_current_user
+from api import audit, gemini_ocr
+from api.auth import get_current_user, require_role
 from api.config import get_config
 from api.db_cloud import get_conn
 from api.ollama_manager import ensure_running
@@ -247,7 +247,7 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
 
 
 @router.post('/gauges/reading')
-def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_user)):
+def process_photo_reading(req: PhotoRequest, user: dict = Depends(require_role('operator'))):
     """Accept a gauge photo, attempt OCR, store the reading, return the result."""
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
@@ -290,7 +290,7 @@ def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
 
 
 @router.post('/gauges')
-def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_current_user)):
+def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(require_role('operator'))):
     """Submit a gauge reading entered manually (no photo required)."""
     # Reject inf/nan with a clean error — stored, they would corrupt the gauge-listing JSON.
     if not math.isfinite(req.value):
@@ -369,7 +369,7 @@ def list_gauges(
 @router.post('/gauges/import-csv')
 async def import_gauge_csv(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role('admin')),
 ):
     """Import gauge readings from the cofounder's gauge_readings.csv format.
 
@@ -438,7 +438,7 @@ async def import_gauge_csv(
 
 
 @router.delete('/gauges/{reading_id}')
-def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)):
+def delete_gauge_reading(reading_id: int, user: dict = Depends(require_role('admin'))):
     """Permanently delete a single gauge reading by ID.
 
     NNR audit: the deletion (actor + prior content) is recorded in audit_log *before*
@@ -453,11 +453,8 @@ def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail='Reading not found')
-        ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
-        conn.execute(
-            "INSERT INTO audit_log (ts, action, lab_id, actor, detail) VALUES (?,?,?,?,?)",
-            [ts, 'delete_gauge_reading', lab_id, user.get('username', ''), json.dumps(dict(row))],
-        )
+        audit.write(conn, 'delete_gauge_reading', user.get('username', ''), lab_id,
+                    json.dumps(dict(row)))
         conn.execute("DELETE FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id])
         conn.commit()
         return {'deleted': reading_id}
@@ -471,7 +468,7 @@ class EurPhotosRequest(BaseModel):
 
 
 @router.post('/gauges/eur-photos')
-def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_user)):
+def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(require_role('admin'))):
     """Accept one or more EUR form photos (base64), run OCR, archive, and bulk-insert readings.
 
     Returns total readings inserted and any per-photo errors.

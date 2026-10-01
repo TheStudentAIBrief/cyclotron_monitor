@@ -15,17 +15,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from api.auth import (
     authenticate, clear_refresh_cookie, create_tokens, ensure_bootstrap_credentials,
-    get_current_user, get_refresh_payload, revoke_token, set_refresh_cookie,
+    get_current_user, get_refresh_payload, require_role, resolve_role, revoke_token,
+    set_refresh_cookie,
 )
 from api.config import get_config
 from api.db_cloud import init_cloud_tables
-from api.routes import admin_import, ask, dashboard, gauges, petrace, push, records, scan, sync
+from api.routes import (
+    admin_import, ask, backup, dashboard, gauges, petrace, push, records, scan, sync, users,
+)
 
 
 @asynccontextmanager
@@ -116,6 +121,15 @@ async def _security_headers(request: Request, call_next):
     return response
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    # FastAPI's default 422 echoes the rejected request body back as `input`. For
+    # the account routes that body holds a plaintext password, which would then
+    # sit in any client or proxy log that records error responses.
+    errors = [{k: v for k, v in e.items() if k != 'input'} for e in exc.errors()]
+    return JSONResponse({'detail': jsonable_encoder(errors)}, status_code=422)
+
+
 @app.get('/health')
 def health():
     return {'status': 'ok'}
@@ -178,7 +192,9 @@ def login(request: Request, response: Response, form: OAuth2PasswordRequestForm 
     # set_refresh_cookie docstring) -- native clients ignore Set-Cookie and keep
     # using the JSON body's refresh_token via SecureStore, unaffected.
     set_refresh_cookie(response, tokens['refresh_token'])
-    return tokens
+    # Informational only (lets a client hide actions the account can't perform) --
+    # the server never trusts it back; the role is re-read on every request.
+    return {**tokens, 'role': resolve_role(form.username)}
 
 
 @app.post('/auth/refresh')
@@ -199,19 +215,21 @@ def logout(response: Response, payload: dict = Depends(get_current_user)):
     return {'status': 'ok'}
 
 
-# dashboard/gauges/records/push/ask/petrace each already declare their own
-# `user: dict = Depends(get_current_user)` per route (they need the returned
-# user dict for lab_id/username) — adding it again here would just decode the
-# same JWT twice per request. admin_import's routes take no such parameter, so
-# it's the one router that still needs an explicit guard here, or its 6
-# database-write endpoints would be reachable with no authentication at all.
+# dashboard/gauges/records/push/ask/petrace/users/backup each already declare their own
+# `Depends(get_current_user)` / `Depends(require_role(...))` per route (they need
+# the returned user dict for lab_id/username) — adding it again here would just
+# decode the same JWT twice per request. admin_import's routes take no such
+# parameter, so it's the one router that still needs an explicit guard here, or
+# its 6 database-write endpoints would be reachable with no authentication at all.
 app.include_router(dashboard.router, prefix='/api')
 app.include_router(gauges.router,    prefix='/api')
 app.include_router(records.router,   prefix='/api')
 app.include_router(push.router,      prefix='/api')
 app.include_router(ask.router,       prefix='/api')
 app.include_router(petrace.router,   prefix='/api')
-app.include_router(admin_import.router, prefix='/api', dependencies=[Depends(get_current_user)])
+app.include_router(users.router,     prefix='/api')
+app.include_router(backup.router,    prefix='/api')
+app.include_router(admin_import.router, prefix='/api', dependencies=[Depends(require_role('admin'))])
 
 # Sync endpoint is protected by X-Sync-Key header (not JWT) — server-to-server only.
 app.include_router(sync.router, prefix='')

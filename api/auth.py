@@ -14,6 +14,7 @@ import jwt
 from fastapi import Cookie, Depends, Header, HTTPException, Response
 from fastapi.security import OAuth2PasswordBearer
 
+from api import users
 from api.config import get_config
 
 # Never ship a hardcoded signing key. Production sets API_SECRET_KEY (Render does this
@@ -67,9 +68,12 @@ def _load_creds() -> dict | None:
     cfg = get_config()
     path = Path(cfg['db_path']).parent / '.credentials.json'
     try:
-        return json.loads(path.read_text(encoding='utf-8'))
+        creds = json.loads(path.read_text(encoding='utf-8'))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    # Read on every request now (see _account), so a file that parses but isn't
+    # the expected object must degrade to "no built-in admin", not a 500 for all.
+    return creds if isinstance(creds, dict) else None
 
 
 def _verify_password(password: str, hash_b64: str) -> bool:
@@ -85,17 +89,62 @@ def _verify_password(password: str, hash_b64: str) -> bool:
 _DUMMY_HASH = base64.b64encode(secrets.token_bytes(64)).decode('ascii')
 
 
+# Least privilege: each role is a superset of the one before it.
+#   viewer   -- read-only
+#   operator -- viewer + submit gauge readings
+#   admin    -- operator + bulk import, delete regulated records, manage users
+ROLES = ('viewer', 'operator', 'admin')
+
+
+def builtin_username() -> str | None:
+    """Username of the original single login (data/.credentials.json), if any."""
+    creds = _load_creds()
+    return creds.get('username') if creds else None
+
+
+def _live_user(username: str) -> dict | None:
+    """The per-person account, or None if missing, disabled or holding a role
+    this code doesn't know (e.g. a row edited by hand)."""
+    user = users.get_user(username)
+    if not user or user['disabled'] or user['role'] not in ROLES:
+        return None
+    return user
+
+
+def _account(username: str) -> tuple[str, int] | None:
+    """(role, token_version) of a usable account, else None.
+
+    The original single login is a built-in admin, so turning RBAC on can never
+    lock out the one account a lab already uses. Its token_version is always 0
+    and per-person accounts start at 1, so a per-person token is never accepted
+    as the built-in admin's even if the built-in is later renamed onto that
+    person's username."""
+    if username == builtin_username():
+        return 'admin', 0
+    user = _live_user(username)
+    return (user['role'], user['token_version']) if user else None
+
+
+def resolve_role(username: str) -> str | None:
+    """The account's current role, or None if it is disabled or doesn't exist."""
+    account = _account(username)
+    return account[0] if account else None
+
+
 def authenticate(username: str, password: str) -> bool:
     creds = _load_creds()
-    if not creds or creds.get('username') != username:
-        # Constant-time dummy verify (same 600k-iteration PBKDF2 cost as the real
-        # path) to prevent username enumeration via response-time differences.
-        _verify_password(password, _DUMMY_HASH)
-        return False
-    return _verify_password(password, creds['hash'])
+    if creds and creds.get('username') == username:
+        return _verify_password(password, creds['hash'])
+    user = _live_user(username)
+    if user:
+        return _verify_password(password, user['password_hash'])
+    # Constant-time dummy verify (same 600k-iteration PBKDF2 cost as the real
+    # path) to prevent username enumeration via response-time differences.
+    _verify_password(password, _DUMMY_HASH)
+    return False
 
 
-def _hash_password(password: str) -> str:
+def hash_password(password: str) -> str:
     """Same PBKDF2-SHA256 format _verify_password expects (salt[:32] + dk)."""
     salt = secrets.token_bytes(32)
     dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 600_000)
@@ -150,7 +199,7 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
         return
     creds_path.parent.mkdir(parents=True, exist_ok=True)
     creds_path.write_text(
-        json.dumps({'username': username, 'hash': _hash_password(password)}),
+        json.dumps({'username': username, 'hash': hash_password(password)}),
         encoding='utf-8',
     )
     logging.getLogger('uvicorn.error').info(
@@ -160,14 +209,18 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
 
 def create_tokens(username: str, lab_id: str) -> dict:
     now = datetime.now(timezone.utc)
+    # 'ver' pins the token to the account's current token_version -- see
+    # _live_role(). (An unknown username gets 0; such a token is refused anyway.)
+    account = _account(username)
+    ver = account[1] if account else 0
     access = jwt.encode(
         {'sub': username, 'lab_id': lab_id, 'exp': now + _ACCESS_EXPIRE, 'type': 'access',
-         'jti': uuid.uuid4().hex},
+         'jti': uuid.uuid4().hex, 'ver': ver},
         _SECRET, algorithm=_ALGORITHM,
     )
     refresh = jwt.encode(
         {'sub': username, 'lab_id': lab_id, 'exp': now + _REFRESH_EXPIRE, 'type': 'refresh',
-         'jti': uuid.uuid4().hex},
+         'jti': uuid.uuid4().hex, 'ver': ver},
         _SECRET, algorithm=_ALGORITHM,
     )
     return {'access_token': access, 'refresh_token': refresh, 'token_type': 'bearer'}
@@ -225,11 +278,39 @@ def _decode(token: str) -> dict:
     return payload
 
 
+def _live_role(payload: dict) -> str:
+    """The role of the account a decoded token belongs to, or 401.
+
+    Looked up on every request rather than trusted from the token, so demoting
+    or disabling an account takes effect immediately instead of when its token
+    happens to expire. The token's 'ver' must also match the account's current
+    token_version: a password reset or an enable/disable bumps it, so tokens
+    issued before that are dead for good (tokens minted before this claim
+    existed have none and count as 0, which only the built-in admin matches)."""
+    account = _account(payload.get('sub', ''))
+    if account is None or account[1] != payload.get('ver', 0):
+        raise HTTPException(status_code=401, detail='Account is disabled, changed or no longer exists')
+    return account[0]
+
+
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     payload = _decode(token)
     if payload.get('type') != 'access':
         raise HTTPException(status_code=401, detail='Access token required')
-    return payload
+    return {**payload, 'username': payload['sub'], 'role': _live_role(payload)}
+
+
+def require_role(minimum: str):
+    """Dependency: the caller must hold `minimum` or a higher role (see ROLES)."""
+    needed = ROLES.index(minimum)
+
+    def _require(user: dict = Depends(get_current_user)) -> dict:
+        role = user.get('role')
+        if role not in ROLES or ROLES.index(role) < needed:
+            raise HTTPException(status_code=403, detail=f'This action requires the {minimum} role.')
+        return user
+
+    return _require
 
 
 def _extract_refresh_token(
@@ -252,4 +333,7 @@ def get_refresh_payload(token: str = Depends(_extract_refresh_token)) -> dict:
     payload = _decode(token)
     if payload.get('type') != 'refresh':
         raise HTTPException(status_code=401, detail='Refresh token required')
+    # A disabled/reset account must not keep minting access tokens from a
+    # refresh token issued while it was still good (valid for 7 days).
+    _live_role(payload)
     return payload

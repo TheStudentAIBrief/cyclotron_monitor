@@ -10,6 +10,7 @@ from api import config as _config  # noqa: E402
 _config.get_config.cache_clear()
 
 import api.main as main  # noqa: E402
+from api import users  # noqa: E402
 from api.auth import create_tokens, get_current_user  # noqa: E402
 from api.db_cloud import init_cloud_tables  # noqa: E402
 
@@ -26,6 +27,8 @@ def test_logout_revokes_the_access_token(tmp_path, monkeypatch):
     monkeypatch.setenv('DATABASE_PATH', db_path)
     _config.get_config.cache_clear()
     try:
+        # A token is only honoured for an account that exists (see get_current_user).
+        users.create_user('tester', 'unused-hash', 'viewer', 'test')
         toks = create_tokens('tester', 'petlabs-pretoria')
         with TestClient(main.app) as c:
             r = c.post('/auth/logout', headers={'Authorization': f"Bearer {toks['access_token']}"})

@@ -20,7 +20,7 @@ from api.auth import get_current_user  # noqa: E402
 from api.routes.gauges import _MAX_EUR_PHOTOS  # noqa: E402
 
 # Bypass JWT for these limit tests — the checks under test run before any auth-protected work.
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 
 def test_oversized_request_body_is_rejected(monkeypatch):
@@ -40,7 +40,7 @@ def test_eur_photos_rejects_oversized_batch():
     # collection-time setup, and pytest finishes collecting every file before any
     # test actually runs -- so the module-level assignment above isn't reliably
     # still in effect by the time this test body executes.
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
     with TestClient(main.app) as client:
         payload = {'photos_b64': ['eHg='] * (_MAX_EUR_PHOTOS + 1), 'filenames': []}
         r = client.post('/api/gauges/eur-photos', json=payload)

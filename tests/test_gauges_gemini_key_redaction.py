@@ -56,7 +56,7 @@ def test_gauge_reading_error_never_discloses_gemini_key(monkeypatch, tmp_path):
     # and this test runs before some of them in collection/execution order, so
     # an unconditional pop() here strips state they still depend on afterward.
     prev_override = main.app.dependency_overrides.get(get_current_user)
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
     try:
         with TestClient(main.app) as client:
             r = client.post('/api/gauges/reading', json={'photo_b64': '/9j/abcd', 'gauge_name': 'G-1'})

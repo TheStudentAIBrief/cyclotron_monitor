@@ -75,7 +75,7 @@ def test_local_ollama_vision_fallback_reads_real_endpoint(monkeypatch):
     # Simulate start_dev.ps1 having set GAUGE_OLLAMA_MODEL correctly.
     monkeypatch.setattr(gauges, '_OLLAMA_MODEL', _REQUIRED_MODEL)
 
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
     photo_b64 = _tiny_test_image_b64()
 
@@ -137,7 +137,7 @@ def test_local_ollama_vision_fallback_handles_full_size_photo_without_context_ov
     monkeypatch.setattr(gemini_ocr, 'is_configured', lambda: False)
     monkeypatch.setattr(gauges, '_OLLAMA_MODEL', _REQUIRED_MODEL)
 
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
     photo_b64 = _full_size_test_image_b64()
 
