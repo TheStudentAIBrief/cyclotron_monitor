@@ -6,6 +6,7 @@ import logging
 import os
 import secrets
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ import jwt
 from fastapi import Cookie, Depends, Header, HTTPException, Response
 from fastapi.security import OAuth2PasswordBearer
 
-from api import users
+from api import audit, users
 from api.config import get_config
 
 # Never ship a hardcoded signing key. Production sets API_SECRET_KEY (Render does this
@@ -69,7 +70,7 @@ def _load_creds() -> dict | None:
     path = Path(cfg['db_path']).parent / '.credentials.json'
     try:
         creds = json.loads(path.read_text(encoding='utf-8'))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except (OSError, ValueError):   # missing, unreadable, not UTF-8, not JSON, absurd number
         return None
     # Read on every request now (see _account), so a file that parses but isn't
     # the expected object must degrade to "no built-in admin", not a 500 for all.
@@ -115,12 +116,15 @@ def _account(username: str) -> tuple[str, int] | None:
     """(role, token_version) of a usable account, else None.
 
     The original single login is a built-in admin, so turning RBAC on can never
-    lock out the one account a lab already uses. Its token_version is always 0
-    and per-person accounts start at 1, so a per-person token is never accepted
-    as the built-in admin's even if the built-in is later renamed onto that
-    person's username."""
-    if username == builtin_username():
-        return 'admin', 0
+    lock out the one account a lab already uses. Its token_version is 0 for a
+    login file written before the version existed, and negative once the login
+    has been (re)created by ensure_bootstrap_credentials. Per-person accounts
+    start at 1, so a per-person token is never accepted as the built-in admin's
+    even if the built-in is later renamed onto that person's username."""
+    creds = _load_creds()
+    if creds and username == creds.get('username'):
+        version = creds.get('token_version', 0)
+        return 'admin', version if isinstance(version, int) and version <= 0 else 0
     user = _live_user(username)
     return (user['role'], user['token_version']) if user else None
 
@@ -167,44 +171,130 @@ def ensure_bootstrap_credentials(db_path: str) -> None:
     creds_path = Path(db_path).parent / '.credentials.json'
     force_reset = os.environ.get('BOOTSTRAP_FORCE_RESET', '').strip().lower() in ('1', 'true', 'yes')
 
-    if creds_path.exists():
-        if not force_reset:
-            logging.getLogger('uvicorn.error').info(
-                'Bootstrap credentials check: %s already exists — skipping (this is '
-                'expected on every boot after the first). Set BOOTSTRAP_FORCE_RESET=true '
-                'to replace it if the login is wrong/forgotten.', creds_path,
-            )
-            return
-        logging.getLogger('uvicorn.error').warning(
-            'BOOTSTRAP_FORCE_RESET is set — deleting %s and recreating it from '
-            'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD. Unset BOOTSTRAP_FORCE_RESET '
-            'after this boot succeeds, or every future restart will do this again.',
-            creds_path,
+    resetting = creds_path.exists()
+    if resetting and not force_reset:
+        logging.getLogger('uvicorn.error').info(
+            'Bootstrap credentials check: %s already exists — skipping (this is '
+            'expected on every boot after the first). Set BOOTSTRAP_FORCE_RESET=true '
+            'to replace it if the login is wrong/forgotten.', creds_path,
         )
-        creds_path.unlink()
+        _record_pending_login_change(creds_path, db_path)
+        return
+    # The new login is checked before the old one is touched: a reset that
+    # cannot go ahead must leave the existing login working, not delete it.
+    kept = ' The existing login is unchanged.' if resetting else ''
     username = os.environ.get('BOOTSTRAP_USERNAME', '').strip()
     password = os.environ.get('BOOTSTRAP_PASSWORD', '')
     if not username or not password:
         logging.getLogger('uvicorn.error').warning(
-            'No login exists yet (%s not found) and BOOTSTRAP_USERNAME/'
-            'BOOTSTRAP_PASSWORD are not both set — nobody can log in until '
-            'both are configured and the service restarts.', creds_path,
+            'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD are not both set, so no login can be '
+            'created from them (%s).%s', creds_path,
+            kept or ' Nobody can log in until both are configured and the service restarts.',
         )
         return
     if len(password) < 12:
         logging.getLogger('uvicorn.error').warning(
             'BOOTSTRAP_PASSWORD is set but shorter than 12 characters — refusing '
-            'to create credentials. Set a longer BOOTSTRAP_PASSWORD and restart.'
+            'to create credentials. Set a longer BOOTSTRAP_PASSWORD and restart.%s', kept,
         )
         return
-    creds_path.parent.mkdir(parents=True, exist_ok=True)
-    creds_path.write_text(
-        json.dumps({'username': username, 'hash': hash_password(password)}),
-        encoding='utf-8',
-    )
+    if resetting:
+        if _already_set(creds_path, username, password):
+            # The flag was left on after a reset that already happened. Doing it
+            # again would log the admin out, and add an audit entry, on every restart.
+            logging.getLogger('uvicorn.error').warning(
+                'BOOTSTRAP_FORCE_RESET is still set, but the login already matches '
+                'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD — nothing to do. Unset BOOTSTRAP_FORCE_RESET.'
+            )
+            _record_pending_login_change(creds_path, db_path)
+            return
+        logging.getLogger('uvicorn.error').warning(
+            'BOOTSTRAP_FORCE_RESET is set — replacing %s from '
+            'BOOTSTRAP_USERNAME/BOOTSTRAP_PASSWORD. Unset BOOTSTRAP_FORCE_RESET '
+            'after this boot succeeds.', creds_path,
+        )
+    try:
+        creds_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_creds(creds_path, {
+            'username': username,
+            'hash': hash_password(password),
+            # Baked into every token (see _account): a new value here ends every
+            # session opened with the previous password. Negative, so it can
+            # never equal a per-person account's version (those start at 1).
+            'token_version': -time.time_ns(),
+            # Cleared once the change is in the audit log (_record_pending_login_change).
+            'audit_pending': 'builtin_password_reset' if resetting else 'builtin_login_created',
+            'audit_ref': secrets.token_hex(8),
+        })
+    except OSError as exc:
+        # Never let this stop the service starting: the old login, if any, still works.
+        logging.getLogger('uvicorn.error').error(
+            'Could not write %s (%s) — the login was NOT changed.%s', creds_path, exc, kept)
+        return
     logging.getLogger('uvicorn.error').info(
         'Bootstrapped credentials for user %r at %s', username, creds_path,
     )
+    _record_pending_login_change(creds_path, db_path)
+
+
+def _write_creds(creds_path: Path, creds: dict) -> None:
+    """Replace the login file in one step, so a failed write (disk full, crash)
+    leaves the previous file -- the only login a lab may have -- intact."""
+    tmp_path = creds_path.with_name(creds_path.name + '.tmp')
+    try:
+        tmp_path.write_text(json.dumps(creds), encoding='utf-8')
+        os.replace(tmp_path, creds_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _read_creds(creds_path: Path) -> dict | None:
+    try:
+        creds = json.loads(creds_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return creds if isinstance(creds, dict) else None
+
+
+def _already_set(creds_path: Path, username: str, password: str) -> bool:
+    creds = _read_creds(creds_path)
+    if not creds or creds.get('username') != username or not isinstance(creds.get('hash'), str):
+        return False
+    try:
+        return _verify_password(password, creds['hash'])
+    except Exception:       # a hash that is not in the expected format does not match
+        return False
+
+
+def _record_pending_login_change(creds_path: Path, db_path: str) -> None:
+    """Write the audit entry for a login that was created or reset -- the evidence
+    that a password known to be exposed has been replaced, and when. The login
+    file carries the pending entry until this succeeds, so a database that was
+    locked, or a crash straight after the reset, delays the record but cannot
+    lose it. Never blocks start-up."""
+    creds = _read_creds(creds_path)
+    action = creds.get('audit_pending') if creds else None
+    if action not in ('builtin_password_reset', 'builtin_login_created'):
+        return
+    # The entry carries a reference, so that if marking the file as recorded
+    # fails after the entry is written, later starts do not write it again.
+    ref = str(creds.get('audit_ref') or '')[:32]
+    detail = (f"built-in admin login {creds.get('username')!r} set from BOOTSTRAP_PASSWORD; "
+              f'earlier sessions ended (ref {ref})')
+    try:
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            recorded = conn.execute(
+                'SELECT 1 FROM audit_log WHERE action=? AND detail=?', [action, detail]).fetchone()
+            if not recorded:
+                audit.write(conn, action, 'bootstrap', get_config().get('lab_id', 'default'), detail)
+                conn.commit()
+        finally:
+            conn.close()
+        _write_creds(creds_path, {k: v for k, v in creds.items() if k not in ('audit_pending', 'audit_ref')})
+    except (sqlite3.Error, OSError) as exc:
+        logging.getLogger('uvicorn.error').warning(
+            'Could not record the built-in login change yet (%s) — will try again on the next start.', exc)
 
 
 def create_tokens(username: str, lab_id: str) -> dict:

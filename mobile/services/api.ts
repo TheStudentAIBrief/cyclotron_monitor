@@ -1,4 +1,5 @@
 import { getAccessToken, refreshAccessToken, logout } from './auth';
+import type { AskStatus } from './askStatus';
 import Config from '../constants/Config';
 import { BeamTrendRow, GaugeHistoryRow } from '../utils/dashboardWidgets';
 
@@ -257,7 +258,9 @@ export const getPETraceDashboard = () =>
 // ─── Ask AI ───────────────────────────────────────────────────────────────────
 
 export const askAI = (question: string) =>
-  request<{ answer: string; model: string }>('/api/ask', {
+  // status/generated_at: the real component status, read from the data by the
+  // server (not written by the model), shown next to every answer.
+  request<{ answer: string; model: string; status?: AskStatus[]; generated_at?: string | null }>('/api/ask', {
     method: 'POST',
     body: JSON.stringify({ question }),
   }, Config.API_ASK_TIMEOUT_MS);

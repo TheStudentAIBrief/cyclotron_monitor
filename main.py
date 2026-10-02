@@ -27,6 +27,13 @@ def load_config():
     return cfg
 
 
+def _trained_as(ok: bool) -> str:
+    import os
+    if not ok:
+        return 'COUNTER-ONLY'
+    return 'MODEL' if os.environ.get('MODEL_HMAC_KEY') else 'MODEL (UNSIGNED - will not be used; set MODEL_HMAC_KEY and re-train)'
+
+
 def cmd_train(cfg):
     from ingest import ingest_all
     from models.trainer import train_component, COMPONENTS
@@ -40,7 +47,7 @@ def cmd_train(cfg):
     print("=== Training models ===")
     for comp in COMPONENTS:
         ok = train_component(comp, cfg['db_path'], cfg['model_dir'], build_features)
-        print(f"  {comp}: {'MODEL' if ok else 'COUNTER-ONLY'}")
+        print(f"  {comp}: {_trained_as(ok)}")
 
 
 def cmd_predict(cfg):
@@ -85,6 +92,8 @@ def cmd_predict(cfg):
             result = predict(comp, feats, cfg['model_dir'], counter_days, last_maint)
             preds.append(result)
             print(f"  {comp}: {result.alert_level} ({result.days_estimate:.0f}d) [{result.primary_signal}]")
+            if result.warning:
+                print(f"    WARNING: {result.warning}")
         except Exception as e:
             print(f"  {comp}: ERROR — {e}", file=sys.stderr)
 
@@ -115,7 +124,7 @@ def cmd_train_only(cfg):
     print("=== Training models (ingest skipped) ===")
     for comp in COMPONENTS:
         ok = train_component(comp, cfg['db_path'], cfg['model_dir'], build_features)
-        print(f"  {comp}: {'MODEL' if ok else 'COUNTER-ONLY'}")
+        print(f"  {comp}: {_trained_as(ok)}")
 
 
 def cmd_monitor(cfg):

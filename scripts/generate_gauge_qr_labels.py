@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from monitor.gauge_scan import build_qr, fetch_gauges, gauge_scan_url  # noqa: E402
+from monitor.gauge_scan import build_qr, fetch_gauges, gauge_scan_url, scan_code  # noqa: E402
 
 LABEL_BG = "#1a1a2e"
 
@@ -69,7 +69,11 @@ def main(db_path, base_url, output_dir):
     gauges = fetch_gauges(db_path)
     label_images = []
     for gauge in gauges:
-        url = gauge_scan_url(base_url, gauge["gauge_name"])
+        # With QR_LINK_SECRET set (the same value as on the server), the printed link
+        # carries the code the server will ask for once QR_REQUIRE_CODE=1.
+        secret = os.environ.get("QR_LINK_SECRET")
+        code = scan_code(secret, gauge["gauge_name"]) if secret else None
+        url = gauge_scan_url(base_url, gauge["gauge_name"], code)
         qr = build_qr(url)
         qr_image = qr.make_image(fill_color="white", back_color=LABEL_BG)
         label_image = render_label_image(gauge, qr_image)

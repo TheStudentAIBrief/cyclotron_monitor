@@ -16,14 +16,21 @@ from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_sample_weight
 
 
+def _signature(key: str, data: bytes) -> str:
+    return 'hmac-sha256:' + hmac.new(key.encode(), data, hashlib.sha256).hexdigest()
+
+
 def _write_checksum(path: Path):
     """Write the integrity sidecar. With MODEL_HMAC_KEY set, sign with a keyed HMAC
-    (forgery-resistant); otherwise fall back to a legacy unkeyed SHA-256 for back-compat."""
+    (forgery-resistant); otherwise write a legacy unkeyed SHA-256, which the
+    predictor refuses unless MODEL_ALLOW_UNSIGNED=1."""
     data = Path(path).read_bytes()
     key = os.environ.get('MODEL_HMAC_KEY')
     if key:
-        tag = 'hmac-sha256:' + hmac.new(key.encode(), data, hashlib.sha256).hexdigest()
+        tag = _signature(key, data)
     else:
+        print(f"WARNING: MODEL_HMAC_KEY is not set, so {Path(path).name} is unsigned and will NOT be "
+              "used for predictions. Set the key, then re-train: python main.py train-only")
         tag = hashlib.sha256(data).hexdigest()
     Path(path).with_suffix('.sha256').write_text(tag)
 

@@ -29,7 +29,8 @@ def test_sync_dashboard_accepts_correct_key():
     with TestClient(main.app) as client:
         r = client.post(
             '/sync/dashboard',
-            json={'hello': 'world'},
+            # Only something shaped like a dashboard is stored (tests/test_sync_hardening.py).
+            json={'generated_at': '2026-10-01T08:00:00', 'components': []},
             headers={'X-Sync-Key': _VALID_KEY},
         )
     assert r.status_code == 200
@@ -73,4 +74,5 @@ def test_sync_key_comparison_is_constant_time(monkeypatch):
         )
 
     assert len(calls) == 1
-    assert calls[0] == ('wrong-key', _VALID_KEY)
+    # Compared as bytes, so a key with a non-ASCII character cannot make the comparison raise.
+    assert calls[0] == (b'wrong-key', _VALID_KEY.encode())

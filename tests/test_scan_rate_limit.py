@@ -153,10 +153,10 @@ def test_a_burst_of_guesses_cannot_slip_past_the_allowance(client):
 def test_a_real_gauge_is_not_served_if_the_allowance_ran_out_while_the_request_was_in_flight(client, monkeypatch):
     real = scan._find_gauge
 
-    def _slow_lookup(gauge_name):
+    def _slow_lookup(gauge_name, request):
         for _ in range(scan.MAX_UNKNOWN_PER_MINUTE):        # another connection finishes guessing meanwhile
             scan._unknown.add('testclient')
-        return real(gauge_name)
+        return real(gauge_name, request)
 
     monkeypatch.setattr(scan, '_find_gauge', _slow_lookup)
     assert client.get('/scan/0096').status_code == 429

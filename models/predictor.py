@@ -13,6 +13,17 @@ _model_cache: dict[str, tuple[float, object]] = {}  # path → (mtime, deseriali
 _log = logging.getLogger('cyclotron.predictor')
 
 
+class ModelIntegrityError(RuntimeError):
+    """A model file is missing, missing its integrity file, unsigned, or changed."""
+
+
+UNVERIFIED_MODEL_WARNING = (
+    "The prediction model for this component could not be verified (missing, unsigned or changed), so it was "
+    "not used. This prediction is based on the lifetime counter only and may be too low: the alert "
+    "level is held at YELLOW or above until the model is re-trained with MODEL_HMAC_KEY set."
+)
+
+
 def _load_verified(path: Path) -> object:
     """Load and deserialize a verified pickle, caching by file modification time.
 
@@ -43,32 +54,37 @@ def _verify_checksum(path: Path) -> bytes:
     """
     sha_path = path.with_suffix('.sha256')
     if not sha_path.exists():
-        raise RuntimeError(
+        raise ModelIntegrityError(
             "Model integrity file missing. Re-run 'python main.py train' to regenerate."
         )
-    expected = sha_path.read_text().strip()
-    data = path.read_bytes()  # read once — shared between verification and deserialization
+    try:
+        # Read as bytes: read_text() would use the machine's locale and can fail on stray bytes.
+        expected = sha_path.read_bytes().decode('ascii', 'replace').strip()
+        data = path.read_bytes()  # read once — shared between verification and deserialization
+    except OSError:
+        raise ModelIntegrityError("Model file or its integrity file could not be read.")
     # When MODEL_HMAC_KEY is set, models are signed with a keyed HMAC ('hmac-sha256:<tag>')
     # that an attacker who can only write the model directory cannot forge. A bare-hex
-    # sidecar is a legacy *unkeyed* SHA-256 (forgeable): still accepted for backward
-    # compatibility, but rejected when MODEL_REQUIRE_SIGNED=1.
+    # sidecar is a legacy *unkeyed* SHA-256, which anyone who can swap the model file
+    # can also recompute -- so it is refused unless MODEL_ALLOW_UNSIGNED=1 (and always
+    # when MODEL_REQUIRE_SIGNED=1). An unsigned model cannot be made trustworthy after
+    # the fact; it has to be re-trained with the key set.
     key = os.environ.get('MODEL_HMAC_KEY')
     if expected.startswith('hmac-sha256:'):
         if not key:
-            raise RuntimeError("Model is signed but MODEL_HMAC_KEY is not configured.")
+            raise ModelIntegrityError("Model is signed but MODEL_HMAC_KEY is not configured.")
         actual = 'hmac-sha256:' + hmac.new(key.encode(), data, hashlib.sha256).hexdigest()
     else:
-        if os.environ.get('MODEL_REQUIRE_SIGNED') == '1':
-            raise RuntimeError(
-                "Unsigned model rejected (MODEL_REQUIRE_SIGNED=1). "
-                "Re-train with MODEL_HMAC_KEY set to sign it."
+        if os.environ.get('MODEL_ALLOW_UNSIGNED') != '1' or os.environ.get('MODEL_REQUIRE_SIGNED') == '1':
+            raise ModelIntegrityError(
+                "Unsigned model rejected. Set MODEL_HMAC_KEY and re-train "
+                "('python main.py train-only') to produce a signed one."
             )
-        if key:
-            _log.warning("Model %s uses a legacy unkeyed checksum; re-train with "
-                         "MODEL_HMAC_KEY to sign it.", path.name)
+        _log.warning("Model %s is unsigned and was accepted only because MODEL_ALLOW_UNSIGNED=1; "
+                     "re-train with MODEL_HMAC_KEY set to sign it.", path.name)
         actual = hashlib.sha256(data).hexdigest()
     if not hmac.compare_digest(actual, expected):
-        raise RuntimeError(
+        raise ModelIntegrityError(
             "Model integrity check failed. File may have been tampered with. "
             "Re-run 'python main.py train'."
         )
@@ -87,6 +103,9 @@ class PredictionResult:
     counter_days: float
     warning: str = None
     trained_at: str = None
+    # True when a model exists for the component but was not used because it
+    # could not be verified (see predict); the alert file names these.
+    model_unverified: bool = False
     # Additive/informational only — see models/anomaly.py. Never gates or
     # changes alert_level/days_estimate/risk_score; six independent blend
     # experiments showed how dangerous it is for a "smarter" signal to
@@ -207,37 +226,59 @@ def predict(component: str, features: dict, model_dir: str,
 
     counter_risk = max(0.0, min(1.0, (14.0 - counter_days) / 14.0))
 
-    if not model_path.exists():
-        if 'TRANSFER' in component.upper():
-            no_model_warning = (
-                "No digital sensor data available for this component. "
-                "The cyclotron has no embedded sensors that track physical transfer line wear. "
-                "Prediction is based solely on the 2025 paper PPM log — provide the 2026 PPM log to reset the counter."
-            )
-        else:
-            no_model_warning = None
+    def counter_only(warning, at_least_yellow=False):
         days_est = max(0.0, counter_days)
+        level = _alert_level(days_est)
+        if at_least_yellow and level == 'GREEN':
+            level = 'YELLOW'
         return PredictionResult(
             component=component,
             risk_score=round(counter_risk, 3),
             days_estimate=round(days_est, 1),
-            alert_level=_alert_level(days_est),
+            alert_level=level,
             primary_signal='COUNTER_ONLY',
             top_reasons=[f"Lifetime counter: ~{int(days_est)} days remaining"],
             last_maintenance=last_maintenance or 'Unknown',
             counter_days=counter_days,
-            warning=no_model_warning,
+            warning=warning,
             anomaly_score=anomaly_score,
+            model_unverified=at_least_yellow,
         )
 
-    saved = _load_verified(model_path)
+    def unverified():
+        return counter_only(UNVERIFIED_MODEL_WARNING, at_least_yellow=True)
+
+    if not model_path.exists():
+        # A component that never had a model has none of these files. If any is
+        # there, the model was removed: deleting it must not buy a quiet GREEN.
+        leftovers = (cal_path, model_path.with_suffix('.sha256'), cal_path.with_suffix('.sha256'))
+        if any(p.exists() for p in leftovers):
+            _log.error('Model file for %s is missing but its other files are present', component)
+            return unverified()
+        if 'TRANSFER' in component.upper():
+            return counter_only(
+                "No digital sensor data available for this component. "
+                "The cyclotron has no embedded sensors that track physical transfer line wear. "
+                "Prediction is based solely on the 2025 paper PPM log — provide the 2026 PPM log to reset the counter."
+            )
+        return counter_only(None)
+
+    # A model file that is unsigned or has changed is never loaded (loading one
+    # runs whatever code it contains). The component is still monitored, on the
+    # lifetime counter alone -- a stale dashboard would be worse. The counter
+    # cannot see what the model would have seen, so the component is never shown
+    # as GREEN in this state: it stays at YELLOW or above, with the reason.
+    try:
+        saved = _load_verified(model_path)
+        days_cal = _load_verified(cal_path)
+    except ModelIntegrityError as exc:
+        _log.error('Model for %s was not loaded: %s', component, exc)
+        return unverified()
     model = saved['model']
     feature_names = saved['feature_names']
     meta = saved.get('meta', {})
     model_warning = meta.get('warning', None)
     model_trained_at = meta.get('trained_at', None)
-
-    days_cal = _load_verified(cal_path)
 
     X = np.array([[features.get(n, np.nan) for n in feature_names]])
     model_risk = float(model.predict_proba(X)[0, 1])

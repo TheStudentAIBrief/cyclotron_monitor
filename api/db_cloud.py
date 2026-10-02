@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS push_tokens (
 CREATE TABLE IF NOT EXISTS synced_dashboard (
     lab_id    TEXT PRIMARY KEY,
     payload   TEXT NOT NULL,
-    synced_at TEXT NOT NULL
+    synced_at TEXT NOT NULL,
+    sources   TEXT              -- JSON list of addresses syncs have come from (api/routes/sync.py)
 );
 
 -- PETrace 800 (PET Labs Pretoria) — one row per production batch.
@@ -165,6 +166,7 @@ _MIGRATIONS = [
     "ALTER TABLE maintenance_events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
     "ALTER TABLE predictions ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
     "ALTER TABLE events ADD COLUMN lab_id TEXT NOT NULL DEFAULT 'petlabs-pretoria'",
+    "ALTER TABLE synced_dashboard ADD COLUMN sources TEXT",
     # For any database whose users table predates token_version (dev/test DBs
     # created while RBAC was being built).
     "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1",

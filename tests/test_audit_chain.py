@@ -40,7 +40,7 @@ def test_untouched_log_verifies(db_path):  # noqa: F811
         _make_three_entries(c, db_path)
     result = _verify(db_path)
     assert result['ok'] is True
-    assert result['chained'] == 3
+    assert result['chained'] == 4          # the three made here + the built-in login being created
     assert result['first_bad_id'] is None and result['bad_ids'] == []
     assert len(result['head']) == 64
 
@@ -188,7 +188,7 @@ def test_concurrent_writers_cannot_fork_the_chain(db_path):  # noqa: F811
     for t in threads:
         t.join()
     result = _verify(db_path)
-    assert (result['ok'], result['chained']) == (True, 60)
+    assert (result['ok'], result['chained']) == (True, 61)   # 60 + the built-in login being created
 
 
 def test_an_unhashed_entry_slipped_in_after_the_chain_started_is_detected(db_path):  # noqa: F811

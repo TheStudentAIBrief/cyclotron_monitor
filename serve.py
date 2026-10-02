@@ -22,6 +22,7 @@ import base64
 import hashlib
 import hmac
 import http.server
+import ipaddress
 import json
 import logging
 import secrets
@@ -350,6 +351,36 @@ class _BoundedHTTPServer(http.server.HTTPServer):
 
 # ── Server entry point ────────────────────────────────────────────────────────
 
+def _load_tls(tls_dir: str | None) -> ssl.SSLContext | None:
+    """A TLS context from <tls_dir>/cert.pem + key.pem, or None if they are not there."""
+    if not tls_dir:
+        return None
+    cert = Path(tls_dir) / 'cert.pem'
+    key = Path(tls_dir) / 'key.pem'
+    if not (cert.is_file() and key.is_file()):
+        _log.warning(
+            'TLS cert/key not found in %s. '
+            'Run: python setup_tls.py  '
+            'Server is using HTTP (unencrypted).',
+            tls_dir
+        )
+        return None
+    tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls_ctx.load_cert_chain(certfile=str(cert), keyfile=str(key))
+    _log.info('TLS enabled — cert: %s', cert)
+    return tls_ctx
+
+
+def _this_machine_only(host: str) -> bool:
+    if host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def start_server(dashboard_path: str, ui_dir: Path,
                  host: str = '127.0.0.1', port: int = 8080,
                  log_path: str | None = None,
@@ -388,26 +419,24 @@ def start_server(dashboard_path: str, ui_dir: Path,
         _Handler.credentials = None
 
     # Auto-detect TLS: if data/tls/cert.pem + key.pem exist, upgrade to HTTPS
-    tls_ctx = None
-    if tls_dir:
-        cert = Path(tls_dir) / 'cert.pem'
-        key  = Path(tls_dir) / 'key.pem'
-        if cert.is_file() and key.is_file():
-            tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-            tls_ctx.load_cert_chain(certfile=str(cert), keyfile=str(key))
-            _Handler.tls_active = True
-            # Use 8443 for HTTPS when 8080 is the default HTTP port
-            if port == 8080:
-                port = 8443
-            _log.info('TLS enabled — cert: %s', cert)
-        else:
-            _log.warning(
-                'TLS cert/key not found in %s. '
-                'Run: python setup_tls.py  '
-                'Server is using HTTP (unencrypted).',
-                tls_dir
-            )
+    tls_ctx = _load_tls(tls_dir)
+    if tls_ctx:
+        _Handler.tls_active = True
+        # Use 8443 for HTTPS when 8080 is the default HTTP port
+        if port == 8080:
+            port = 8443
+
+    # Reachable from other machines only when encrypted AND behind a login.
+    # On this machine alone (the default) neither is forced.
+    if not _this_machine_only(host):
+        if tls_ctx is None:
+            raise SystemExit(
+                f'Refusing to serve the dashboard on {host} over plain HTTP: anyone on the network '
+                'could read it. Set up TLS first (python setup_tls.py), or serve on 127.0.0.1.')
+        if _Handler.credentials is None:
+            raise SystemExit(
+                f'Refusing to serve the dashboard on {host} without a login. '
+                'Create one first (python setup_credentials.py), or serve on 127.0.0.1.')
 
     scheme = 'https' if tls_ctx else 'http'
     with _BoundedHTTPServer((host, port), _Handler) as srv:

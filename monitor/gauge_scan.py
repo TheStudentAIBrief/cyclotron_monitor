@@ -8,7 +8,10 @@ scripts/import_eur_forms.py.
 Read-only (SELECT only). Never imports from api/ so scripts can use it
 standalone without pulling in the FastAPI app.
 """
+import hashlib
+import hmac
 import sqlite3
+from urllib.parse import quote
 
 import qrcode
 
@@ -39,8 +42,19 @@ def fetch_gauges(db_path, lab_id=None):
     return list(latest.values())
 
 
-def gauge_scan_url(base_url, gauge_name):
-    return f"{base_url.rstrip('/')}/scan/{gauge_name}"
+def scan_code(secret, gauge_name):
+    """The code a QR link carries for this gauge: 80 bits of an HMAC of the gauge
+    name under the deployment's QR_LINK_SECRET. It cannot be worked out from the
+    gauge name, so with QR_REQUIRE_CODE=1 a gauge page only opens for someone
+    holding the printed label (api/routes/scan.py)."""
+    return hmac.new(secret.encode(), gauge_name.encode(), hashlib.sha256).hexdigest()[:20]
+
+
+def gauge_scan_url(base_url, gauge_name, code=None):
+    # Quoted: a name with a space, '#' or '?' would otherwise cut the link short
+    # (and drop the code) when a phone camera reads it.
+    url = f"{base_url.rstrip('/')}/scan/{quote(gauge_name, safe='')}"
+    return f"{url}?c={code}" if code else url
 
 
 def build_qr(url):

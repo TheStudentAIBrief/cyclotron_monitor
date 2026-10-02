@@ -60,6 +60,11 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
             else:
                 action = f"SCHEDULE THIS WEEK (~{days} days remaining)"
             alert_lines.append(f"{pred.component}: {action}")
+        if getattr(pred, 'model_unverified', False):
+            # The counter alone cannot raise what the model would have raised, so
+            # this goes in the alert file whatever the alert level is.
+            alert_lines.append(f"{pred.component}: MODEL NOT VERIFIED - prediction is from the lifetime "
+                               "counter only and may be too low (re-train with MODEL_HMAC_KEY set)")
 
     dashboard = {
         'generated_at': datetime.now().isoformat(timespec='seconds'),

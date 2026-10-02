@@ -6,6 +6,7 @@ level and never raises — local operation must never be interrupted by cloud is
 """
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -41,13 +42,21 @@ def _load_config():
         return _UNREADABLE
 
 
+def _key_in_config_file() -> bool:
+    cfg = _load_config()
+    return isinstance(cfg, dict) and bool(cfg.get('cloud_sync_key'))
+
+
 def _read_cloud_cfg() -> tuple[str, str]:
-    """Return (cloud_api_url, cloud_sync_key) from config.json, or ('', '') if
-    either is absent or not text."""
+    """Return (cloud_api_url, cloud_sync_key), or ('', '') if either is absent or
+    not text. The address comes from config.json. The key comes from the
+    CLOUD_SYNC_KEY environment variable if set, else from config.json -- the
+    environment is preferred, so the key need not sit in a file in the app folder."""
     cfg = _load_config()
     if not isinstance(cfg, dict):
         return '', ''
-    url, key = cfg.get('cloud_api_url', ''), cfg.get('cloud_sync_key', '')
+    url = cfg.get('cloud_api_url', '')
+    key = os.environ.get('CLOUD_SYNC_KEY') or cfg.get('cloud_sync_key', '')
     if not isinstance(url, str) or not isinstance(key, str):
         return '', ''
     return url, key
@@ -102,7 +111,11 @@ def check_config() -> tuple[bool, str]:
     if reason:
         return False, (f'REFUSED: {reason}. Configured address: {_shown(url)} - '
                        'the sync will NOT run until this is fixed.')
-    return True, f'OK: the sync will run, to {_shown(url)}'
+    message = f'OK: the sync will run, to {_shown(url)}'
+    if _key_in_config_file():
+        message += (' Note: the sync key is stored in config.json. Set it as the CLOUD_SYNC_KEY '
+                    'environment variable instead and remove it from the file.')
+    return True, message
 
 
 def sync_if_configured(dashboard_path: str) -> None:

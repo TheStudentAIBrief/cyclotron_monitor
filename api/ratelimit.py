@@ -80,10 +80,17 @@ def client_key(request: Request, trust_forwarded: bool | None = None) -> str:
     so the header can't be used to dodge a limit. Leave it unset when clients
     connect directly, or the header would be entirely theirs to set.
     """
+    return _normalise(client_address(request, trust_forwarded))
+
+
+def client_address(request: Request, trust_forwarded: bool | None = None) -> str:
+    """The caller's address as received (see client_key for which one that is).
+    client_key folds an IPv6 /64 into one key; this does not, for callers that
+    must match an exact address."""
     if trust_forwarded is None:
         trust_forwarded = os.environ.get('TRUST_FORWARDED_FOR') == '1'
     if trust_forwarded:
         last = ','.join(forwarded_for(request)).rsplit(',', 1)[-1].strip()
         if last:
-            return _normalise(last)
-    return _normalise(request.client.host) if request.client else 'unknown'
+            return last[:_MAX_KEY_LEN]
+    return request.client.host if request.client else 'unknown'
