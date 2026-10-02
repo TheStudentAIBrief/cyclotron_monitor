@@ -122,14 +122,29 @@ def upsert_beam_daily(conn, date_str, param, stats, data_quality='ok'):
     )
 
 
+# The three writers below name their columns: when the API runs on the same
+# database file, its start-up (api/db_cloud.py) adds a lab_id column to each of
+# these tables, and an INSERT without a column list then fails outright.
 def insert_events(conn, rows):
-    conn.executemany("INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)", rows)
+    conn.executemany(
+        f"INSERT OR IGNORE INTO events ({_EVENT_COLUMNS}) VALUES (?,?,?,?,?,?)", rows)
 
 
 def upsert_maintenance_event(conn, timestamp, component_key, component_label, source_file):
     conn.execute(
-        "INSERT OR REPLACE INTO maintenance_events VALUES (?,?,?,?)",
+        "INSERT OR REPLACE INTO maintenance_events "
+        "(timestamp, component_key, component_label, source_file) VALUES (?,?,?,?)",
         [timestamp, component_key, component_label, source_file]
+    )
+
+
+def upsert_prediction(conn, run_at, component, risk_score, days_estimate, alert_level,
+                      primary_signal, top_features):
+    conn.execute(
+        "INSERT OR REPLACE INTO predictions "
+        "(run_at, component, risk_score, days_estimate, alert_level, primary_signal, top_features) "
+        "VALUES (?,?,?,?,?,?,?)",
+        [run_at, component, risk_score, days_estimate, alert_level, primary_signal, top_features]
     )
 
 
@@ -395,6 +410,9 @@ def _swap_out_old_events(db_path: str, old_sql: str, delete_cutoff: str, keep_da
     None means no archive is configured. A locked database also returns 0."""
     conn = sqlite3.connect(db_path, timeout=60)
     try:
+        # Without this, renaming the table below would rewrite every view that
+        # reads events to read events_old, which is then dropped.
+        conn.execute("PRAGMA legacy_alter_table=ON")
         # Lock out other writers, then make sure the rows about to be deleted are
         # exactly the rows that were just archived.
         conn.execute('BEGIN IMMEDIATE')
@@ -413,29 +431,27 @@ def _swap_out_old_events(db_path: str, old_sql: str, delete_cutoff: str, keep_da
                 f'{old:,}', keep_days,
             )
 
-        conn.execute("DROP TABLE IF EXISTS events_keep")
-        conn.execute("""
-            CREATE TABLE events_keep (
-                timestamp   TEXT NOT NULL,
-                severity    TEXT,
-                code        TEXT,
-                function    TEXT,
-                message     TEXT,
-                source_file TEXT,
-                UNIQUE(timestamp, source_file, code, function)
-            )
-        """)
+        # Rebuild the table from its own definition, not a fixed one: when the API
+        # shares this database it has added a lab_id column and an index of its
+        # own (api/db_cloud.py), and a fixed six-column table would drop both.
+        table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'").fetchone()[0]
+        # Its indexes and triggers; the index behind UNIQUE has no SQL and comes with the table.
+        attached_sqls = [sql for (sql,) in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') "
+            "AND tbl_name='events' AND sql IS NOT NULL")]
+        conn.execute("ALTER TABLE events RENAME TO events_old")
+        conn.execute(table_sql)
         # Two indexed range reads (recent events, then undated ones) rather than
         # one OR, which would scan the whole table under the write lock.
         conn.execute(
-            f"INSERT INTO events_keep SELECT {_EVENT_COLUMNS} FROM events WHERE timestamp >= ? "
-            f"UNION ALL SELECT {_EVENT_COLUMNS} FROM events WHERE {_UNDATED}",
+            "INSERT INTO events SELECT * FROM events_old WHERE timestamp >= ? "
+            f"UNION ALL SELECT * FROM events_old WHERE {_UNDATED}",
             [delete_cutoff],
         )
-        conn.execute("DROP TABLE events")
-        conn.execute("ALTER TABLE events_keep RENAME TO events")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_events_code_ts ON events(code, timestamp)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp)")
+        conn.execute("DROP TABLE events_old")      # its indexes and triggers go with it, freeing their names
+        for sql in attached_sqls:
+            conn.execute(sql)
         conn.commit()
         _log.info('prune_events: removed %s rows older than %s', f'{old:,}', delete_cutoff)
         return old

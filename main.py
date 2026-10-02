@@ -49,6 +49,7 @@ def cmd_predict(cfg):
     from models.counter import get_counter_days
     from models.predictor import predict
     from monitor.dashboard_writer import write_dashboard
+    from db import upsert_prediction
     import sqlite3
 
     # Use last date in DB so rolling windows have data; fall back to today
@@ -94,11 +95,10 @@ def cmd_predict(cfg):
 
     log_conn = sqlite3.connect(cfg['db_path'], timeout=30)
     for result in preds:
-        log_conn.execute(
-            "INSERT OR REPLACE INTO predictions VALUES (?,?,?,?,?,?,?)",
-            [target_date.isoformat(), result.component, round(result.risk_score, 3),
-             round(result.days_estimate, 1), result.alert_level,
-             result.primary_signal, json.dumps(result.top_reasons)]
+        upsert_prediction(
+            log_conn, target_date.isoformat(), result.component, round(result.risk_score, 3),
+            round(result.days_estimate, 1), result.alert_level,
+            result.primary_signal, json.dumps(result.top_reasons)
         )
     log_conn.commit()
     log_conn.close()

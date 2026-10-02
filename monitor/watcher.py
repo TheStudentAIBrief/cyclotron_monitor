@@ -9,7 +9,8 @@ from watchdog.events import FileSystemEventHandler
 from parsers.beam_parser import parse_beam_file, aggregate_daily
 from parsers.hyper_parser import parse_hyper_file
 from parsers.maintenance_labels import extract_maintenance_events, extract_from_file
-from db import init_db, upsert_beam_daily, insert_events, upsert_maintenance_event, prune_events
+from db import (init_db, upsert_beam_daily, insert_events, upsert_maintenance_event,
+                upsert_prediction, prune_events)
 from monitor.cloud_sync import sync_if_configured
 
 _log = logging.getLogger('cyclotron.watcher')
@@ -112,11 +113,10 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
             log_conn = sqlite3.connect(db_path, timeout=30)
             try:
                 for result in preds:
-                    log_conn.execute(
-                        "INSERT OR REPLACE INTO predictions VALUES (?,?,?,?,?,?,?)",
-                        [target_date.isoformat(), result.component, round(result.risk_score, 3),
-                         round(result.days_estimate, 1), result.alert_level,
-                         result.primary_signal, json.dumps(result.top_reasons)]
+                    upsert_prediction(
+                        log_conn, target_date.isoformat(), result.component, round(result.risk_score, 3),
+                        round(result.days_estimate, 1), result.alert_level,
+                        result.primary_signal, json.dumps(result.top_reasons)
                     )
                 log_conn.commit()
             finally:
