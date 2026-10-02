@@ -1,5 +1,8 @@
 import csv
+import glob
 import gzip
+import hashlib
+import io
 import logging
 import os
 import sqlite3
@@ -131,6 +134,21 @@ def upsert_maintenance_event(conn, timestamp, component_key, component_label, so
 
 
 # ── Archive / prune ────────────────────────────────────────────────────────────
+#
+# The events table is the regulated fault record and the monthly archive files
+# are its permanent copy. ONE RULE governs everything below: an event may only
+# be removed from the table once it is readable in an archive file.
+
+# An event whose timestamp is empty (or starts with anything that sorts below a
+# digit) cannot be placed in a month, so it can be neither archived nor judged
+# "old". Such rows are left in the table for good: a single one used to make the
+# archive step see "nothing to archive" while the prune went on to delete every
+# old event regardless.
+_DATED = "timestamp >= '0'"
+_UNDATED = "timestamp < '0'"
+
+_EVENT_COLUMNS = "timestamp, severity, code, function, message, source_file"
+
 
 def _next_month(d: _date) -> _date:
     if d.month == 12:
@@ -138,20 +156,55 @@ def _next_month(d: _date) -> _date:
     return _date(d.year, d.month + 1, 1)
 
 
+def _event_key(values) -> bytes:
+    """Identity of an event as an archive file stores it (its CSV text form)."""
+    h = hashlib.blake2b(digest_size=16)
+    for v in values:
+        data = ('' if v is None else str(v)).encode('utf-8')
+        h.update(len(data).to_bytes(4, 'big'))   # length-prefixed: no field-boundary ambiguity
+        h.update(data)
+    return h.digest()
+
+
+def _archived_keys(paths) -> set:
+    """Keys of every event in the given archive files. Raises if a file cannot be
+    read -- a damaged archive must stop the prune, never be taken on trust."""
+    keys = set()
+    for path in paths:
+        with gzip.open(path, 'rt', encoding='utf-8', newline='') as f:
+            reader = csv.reader(f)
+            next(reader, None)   # header
+            for row in reader:
+                keys.add(_event_key(row))
+    return keys
+
+
 def archive_old_events(db_path: str, cutoff_date: str, archive_dir: str) -> int:
-    """Export events older than cutoff_date to monthly gzip CSV files.
+    """Make sure every dated event in a complete month before the cutoff month is
+    in a gzip CSV archive file, writing whatever is not there yet.
 
     Design:
     - Uses MIN/MAX to discover date range in O(1) via the timestamp index —
       avoids a DISTINCT scan over millions of rows.
     - One file per calendar month: events_YYYY_MM.csv.gz
-    - Writes are atomic: temp file → os.replace() on the same filesystem.
-    - Months that already have an archive file are skipped — the IBA Cyclone
-      only inserts current-timestamp events, so old months are immutable.
-    - If any month write fails, the exception propagates; prune_events() will
-      abort the prune rather than delete un-archived data.
+    - Writes are atomic and durable: temp file → fsync → os.replace(). The rows
+      are deleted straight afterwards, so the file must really be on disk first.
+    - An existing archive file is never rewritten and never trusted blind. When a
+      month that already has files also has events in the table (an old log
+      ingested later, or a run that archived but did not get to delete), the
+      files are read back and only events they do NOT contain are written, to a
+      supplementary events_YYYY_MM_lateN.csv.gz. Skipping the month because "it
+      already has a file" let prune_events() delete those events unarchived.
+    - Rows are streamed, never loaded a month at a time (a busy month is millions
+      of rows).
+    - Undated events (see _DATED) are not archived here; prune_events() never
+      deletes them either.
+    - If anything fails, the exception propagates; prune_events() then deletes
+      nothing and removes the files this run wrote.
 
-    Returns total rows written to new archive files (0 = all already archived).
+    Returns the number of events confirmed to be in the archive: every dated
+    event older than the start of the cutoff month. prune_events() relies on
+    that being exactly what it is about to delete.
     """
     os.makedirs(archive_dir, exist_ok=True)
     cutoff_month = cutoff_date[:7]  # YYYY-MM — don't archive the partial cutoff month
@@ -159,7 +212,7 @@ def archive_old_events(db_path: str, cutoff_date: str, archive_dir: str) -> int:
     conn = sqlite3.connect(db_path, timeout=120)
     try:
         bounds = conn.execute(
-            "SELECT MIN(timestamp), MAX(timestamp) FROM events WHERE timestamp < ?",
+            f"SELECT MIN(timestamp), MAX(timestamp) FROM events WHERE {_DATED} AND timestamp < ?",
             [cutoff_date],
         ).fetchone()
         if not bounds[0]:
@@ -180,40 +233,67 @@ def archive_old_events(db_path: str, cutoff_date: str, archive_dir: str) -> int:
 
         total = 0
         for tag, m_start, m_end in months:
-            archive_path = os.path.join(archive_dir, f'events_{tag.replace("-", "_")}.csv.gz')
-            if os.path.exists(archive_path):
-                continue  # already archived — immutable month, safe to skip
-
+            stem = os.path.join(archive_dir, f'events_{tag.replace("-", "_")}')
+            existing = [p for p in (f'{stem}.csv.gz', *sorted(glob.glob(f'{glob.escape(stem)}_late*.csv.gz')))
+                        if os.path.exists(p)]
             rows = conn.execute(
-                "SELECT timestamp, severity, code, function, message, source_file "
-                "FROM events WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
+                f"SELECT {_EVENT_COLUMNS} FROM events "
+                "WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
                 [m_start, m_end],
-            ).fetchall()
-
-            if not rows:
-                continue
-
-            # Atomic write: temp file in same directory → os.replace()
-            tmp_fd, tmp_path = tempfile.mkstemp(
-                prefix='.events_tmp_', suffix='.csv.gz', dir=archive_dir,
             )
+            first = rows.fetchone()
+            if first is None:
+                continue
+            already = _archived_keys(existing) if existing else set()
+
+            in_table = written = 0
+            tmp_path = raw = text = None
             try:
-                os.close(tmp_fd)
-                with gzip.open(tmp_path, 'wt', encoding='utf-8', newline='') as f:
-                    w = csv.writer(f)
-                    w.writerow(['timestamp', 'severity', 'code', 'function',
-                                'message', 'source_file'])
-                    w.writerows(rows)
-                os.replace(tmp_path, archive_path)
+                row = first
+                while row is not None:
+                    in_table += 1
+                    if not already or _event_key(row) not in already:
+                        if text is None:
+                            # Atomic write: temp file in same directory → os.replace()
+                            tmp_fd, tmp_path = tempfile.mkstemp(
+                                prefix='.events_tmp_', suffix='.csv.gz', dir=archive_dir)
+                            raw = os.fdopen(tmp_fd, 'wb')
+                            text = io.TextIOWrapper(gzip.GzipFile(fileobj=raw, mode='wb'),
+                                                    encoding='utf-8', newline='')
+                            writer = csv.writer(text)
+                            writer.writerow(['timestamp', 'severity', 'code', 'function',
+                                             'message', 'source_file'])
+                        writer.writerow(row)
+                        written += 1
+                    row = rows.fetchone()
+                if text is not None:
+                    text.close()                 # finishes the gzip stream (leaves `raw` open)
+                    raw.flush()
+                    os.fsync(raw.fileno())       # on disk before anything is deleted
+                    raw.close()
+                    raw = None
+                    archive_path, late = f'{stem}.csv.gz', 0
+                    while os.path.exists(archive_path):   # never rewrite an existing archive
+                        late += 1
+                        archive_path = f'{stem}_late{late}.csv.gz'
+                    os.replace(tmp_path, archive_path)
+                    _log.info('archive_old_events: %s → %s rows (%s)', tag, f'{written:,}',
+                              os.path.basename(archive_path))
             except Exception:
+                for handle in (text, raw):
+                    try:
+                        if handle is not None:
+                            handle.close()
+                    except Exception:
+                        pass
                 try:
-                    os.unlink(tmp_path)
+                    if tmp_path is not None:
+                        os.unlink(tmp_path)
                 except OSError:
                     pass
                 raise
 
-            total += len(rows)
-            _log.info('archive_old_events: %s → %s rows', tag, f'{len(rows):,}')
+            total += in_table
 
     finally:
         conn.close()
@@ -234,45 +314,99 @@ def prune_events(db_path: str, keep_days: int = EVENTS_RETENTION_DAYS,
 
     archive_old_events() only ever archives whole calendar months strictly
     before the cutoff month (it deliberately skips the partial cutoff month —
-    old months are immutable so re-runs can safely skip files that already
-    exist, but a still-partial month isn't safe to treat that way). Deleting
+    a still-partial month can't be written once and left alone). Deleting
     everything before the exact cutoff DATE would therefore silently drop the
     unarchived partial-month days. When archiving, the delete boundary is
     rounded back to the start of the cutoff month so nothing is ever deleted
     that wasn't guaranteed to be archived first.
 
-    Call this from the watcher after each successful refresh to maintain the
-    retention window automatically.
+    The delete is also tied to what the archive step actually covered: with the
+    write lock held, the rows about to go are counted again, and if that is not
+    exactly the number just confirmed in the archive (events arrived in between,
+    or anything else unexpected) nothing is deleted and the next run tries again.
+    Whenever a run ends without deleting, the archive files it wrote are removed
+    again, so a run that keeps failing cannot fill the disk with copies. Only one
+    prune runs at a time (a lock file in archive_dir): two at once could each
+    delete rows the other archived. Undated events (see _DATED) are never deleted.
+
+    Never raises for a busy or locked database — it returns 0 and the next call
+    tries again. Call this from the watcher after each successful refresh to
+    maintain the retention window automatically.
     """
     cutoff = (datetime.now() - timedelta(days=keep_days)).strftime('%Y-%m-%d')
     delete_cutoff = f'{cutoff[:7]}-01' if archive_dir else cutoff
+    old_sql = f"SELECT COUNT(*) FROM events WHERE {_DATED} AND timestamp < ?"
 
     conn = sqlite3.connect(db_path, timeout=60)
     try:
-        old = conn.execute(
-            "SELECT COUNT(*) FROM events WHERE timestamp < ?", [delete_cutoff]
-        ).fetchone()[0]
+        old = conn.execute(old_sql, [delete_cutoff]).fetchone()[0]
         if old == 0:
             return 0
     finally:
         conn.close()
 
-    # Archive first — abort prune if this fails
-    if archive_dir:
+    if not archive_dir:
+        return _swap_out_old_events(db_path, old_sql, delete_cutoff, keep_days, expected=None)
+
+    os.makedirs(archive_dir, exist_ok=True)
+    # Released automatically if this process dies, unlike a plain lock file.
+    lock = sqlite3.connect(os.path.join(archive_dir, '.prune.lock'), timeout=0)
+    try:
         try:
+            lock.execute('BEGIN EXCLUSIVE')
+        except sqlite3.OperationalError:
+            _log.warning('prune_events: another prune is already running — skipping this run')
+            return 0
+
+        before = set(os.listdir(archive_dir))
+        removed = 0
+        try:
+            # Archive first — abort prune if this fails
             archived = archive_old_events(db_path, cutoff, archive_dir)
             if archived:
-                _log.info('prune_events: archived %s rows before pruning', f'{archived:,}')
+                _log.info('prune_events: %s rows confirmed in the archive before pruning', f'{archived:,}')
+            removed = _swap_out_old_events(db_path, old_sql, delete_cutoff, keep_days, expected=archived)
         except Exception as exc:
             _log.error(
                 'prune_events: archive to %s failed (%s) — prune aborted to preserve data',
                 archive_dir, exc,
             )
-            return 0
+        if not removed:
+            # Nothing was deleted, so every event is still in the table: the files
+            # this run wrote are not needed, and leaving them would add a full
+            # duplicate set on every failed attempt.
+            for name in set(os.listdir(archive_dir)) - before:
+                if name.endswith('.csv.gz'):
+                    try:
+                        os.unlink(os.path.join(archive_dir, name))
+                    except OSError:
+                        pass
+        return removed
+    finally:
+        lock.close()
 
-    # Table-swap: keep only recent events
+
+def _swap_out_old_events(db_path: str, old_sql: str, delete_cutoff: str, keep_days: int,
+                         expected: int | None) -> int:
+    """Remove dated events before delete_cutoff with a table swap; returns how many.
+
+    `expected` is the number of events the archive step confirmed; if the rows now
+    due for deletion are not exactly that many, nothing is deleted (0 is returned).
+    None means no archive is configured. A locked database also returns 0."""
     conn = sqlite3.connect(db_path, timeout=60)
     try:
+        # Lock out other writers, then make sure the rows about to be deleted are
+        # exactly the rows that were just archived.
+        conn.execute('BEGIN IMMEDIATE')
+        old = conn.execute(old_sql, [delete_cutoff]).fetchone()[0]
+        if expected is not None and expected != old:
+            _log.error(
+                'prune_events: %s rows are due for deletion but %s were confirmed in the archive — '
+                'nothing deleted; will retry on the next run',
+                f'{old:,}', f'{expected:,}',
+            )
+            return 0
+
         if old > 1_000_000:
             _log.warning(
                 'events table has %s rows older than %s days — running table-swap prune',
@@ -291,10 +425,11 @@ def prune_events(db_path: str, keep_days: int = EVENTS_RETENTION_DAYS,
                 UNIQUE(timestamp, source_file, code, function)
             )
         """)
+        # Two indexed range reads (recent events, then undated ones) rather than
+        # one OR, which would scan the whole table under the write lock.
         conn.execute(
-            "INSERT INTO events_keep "
-            "SELECT timestamp, severity, code, function, message, source_file "
-            "FROM events WHERE timestamp >= ?",
+            f"INSERT INTO events_keep SELECT {_EVENT_COLUMNS} FROM events WHERE timestamp >= ? "
+            f"UNION ALL SELECT {_EVENT_COLUMNS} FROM events WHERE {_UNDATED}",
             [delete_cutoff],
         )
         conn.execute("DROP TABLE events")
@@ -304,5 +439,10 @@ def prune_events(db_path: str, keep_days: int = EVENTS_RETENTION_DAYS,
         conn.commit()
         _log.info('prune_events: removed %s rows older than %s', f'{old:,}', delete_cutoff)
         return old
+    except sqlite3.OperationalError as exc:
+        # Typically "database is locked" (a long ingest holding the write lock).
+        # Nothing was committed; the caller treats 0 as "try again next time".
+        _log.warning('prune_events: could not prune this time (%s) — will retry on the next run', exc)
+        return 0
     finally:
         conn.close()
