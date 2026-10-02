@@ -93,3 +93,30 @@ would apply here: a new header (e.g. `X-Scan-Key`) checked against a configured
 secret, required only when a request is clearly automated/server-to-server
 rather than a one-off human scan. Happy to add this once you're ready to have
 your corresponder call back into this API directly.
+
+## Rate limits
+
+The single-gauge routes (`/scan/<gauge>` and `/scan/<gauge>/qr.png`) need no login,
+so they are rate limited per caller, per minute:
+
+- up to 10 lookups of gauge names that do not exist (`SCAN_MAX_UNKNOWN_PER_MIN`).
+  Past that, every single-gauge request from that caller — pages and QR images,
+  real gauges included — gets `429` until the minute is up, so the reply cannot be
+  used to find out which names exist.
+- up to 120 gauge-page requests (`SCAN_MAX_PER_MIN`). Past that, gauge pages get
+  `429`; QR images are not counted and keep working.
+
+A `429` carries `Retry-After: 60`. A poller should only ask for gauges it knows
+exist and should back off on `429`.
+
+This slows guessing down; it does not make it impossible. One address can still
+try about 14,000 names a day, so short, predictable gauge names remain guessable
+over time. Putting an unguessable code in the QR link is the complete fix.
+
+"Per caller" is the address the connection comes from. Behind a reverse proxy that
+is the proxy, so all visitors share one allowance — and one person guessing names
+locks the gauge pages for everyone for that minute. Set `TRUST_FORWARDED_FOR=1`
+there to count each visitor separately (it uses the last address in
+`X-Forwarded-For`, the one the proxy adds). Before turning it on, call
+`GET /api/admin/client-address` as an admin through the proxy: if
+`counted_as_if_trusted` is your own public address, it is safe to enable.

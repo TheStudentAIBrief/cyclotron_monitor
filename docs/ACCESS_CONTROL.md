@@ -112,3 +112,19 @@ with the admin who did it. Passwords are never logged.
    without a hash, so anything it records after a rollback (e.g. a deleted
    reading) is reported as a broken entry from then on. If a rollback is
    unavoidable, avoid deletions while on the old release and note the ids.
+
+## Cleaning up a stored API key
+
+Readings stored before error messages were redacted can contain an API key, and
+`GET /api/gauges` returns that text to every logged-in user.
+`POST /api/gauges/redact-secrets` (admin) applies the redaction to what is already
+stored, across every lab in the database, then rebuilds the database file so the
+old text is not left behind for a later backup to pick up. It is audit-logged with
+the reading ids only and is safe to run twice.
+
+- Run the scrub **before** deleting an affected reading. From this version on a
+  deletion no longer copies a key into the audit log, but one deleted earlier
+  already did; the response's `audit_entries_with_keys` counts those. They cannot
+  be cleaned, because changing an audit entry would read as tampering.
+- Rotate the key as well: the scrub cannot reach backups taken earlier or anyone
+  who has already read it.

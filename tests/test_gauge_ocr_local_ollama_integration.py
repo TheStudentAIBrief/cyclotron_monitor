@@ -29,7 +29,12 @@ _REQUIRED_MODEL = 'qwen2.5vl:7b'
 
 
 def _ollama_ready() -> bool:
-    """True only if Ollama answers within ~2s AND has the vision model pulled."""
+    """True only if Ollama answers within ~2s AND has the vision model pulled AND this
+    host allows the app to use it (api/ollama_manager.py refuses when
+    OLLAMA_NEWSLETTER_ONLY=1 -- the tests could then only fail, or pass without
+    ever reaching the model)."""
+    if os.environ.get('OLLAMA_NEWSLETTER_ONLY') == '1':
+        return False
     try:
         r = httpx.get(f'{_OLLAMA_HOST}/api/tags', timeout=2.0)
         r.raise_for_status()
@@ -41,7 +46,7 @@ def _ollama_ready() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not _ollama_ready(),
-    reason=f'Ollama not reachable at {_OLLAMA_HOST} or {_REQUIRED_MODEL} not pulled '
+    reason=f'Ollama restricted on this host, not reachable at {_OLLAMA_HOST}, or {_REQUIRED_MODEL} not pulled '
            '(this integration test only runs on machines with a local on-prem Ollama).',
 )
 
@@ -151,3 +156,6 @@ def test_local_ollama_vision_fallback_handles_full_size_photo_without_context_ov
     # even on OCR failure — see process_photo_reading's "no phantom NULL row" path).
     assert 'exceeds the available context size' not in body['raw_ocr_text']
     assert 'exceed_context_size_error' not in body['raw_ocr_text']
+    # ...and the model must actually have answered: any failure before or inside the
+    # Ollama call is reported as 'OCR failed', which the two checks above alone miss.
+    assert 'OCR failed' not in body['raw_ocr_text']

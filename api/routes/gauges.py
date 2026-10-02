@@ -29,11 +29,20 @@ _log = logging.getLogger('cyclotron.gauges')
 # URL, so a real key should never reach an exception string here. Redact any `key=...`
 # query fragment anyway before an upstream error message is returned to the client,
 # logged, or persisted into gauge_readings.raw_ocr_text below.
-_KEY_PARAM_RE = re.compile(r'([?&]key=)[^&\s\'"]+')
+_KEY_PARAM_RE = re.compile(r'([?&](?:api_)?key=)[^&\s\'"]+', re.IGNORECASE)
 
 
 def _redact(msg: str) -> str:
     return _KEY_PARAM_RE.sub(r'\1***REDACTED***', msg)
+
+
+# Google API keys as they appear bare in text (39 chars, 'AIza' prefix).
+_GOOGLE_KEY_RE = re.compile(r'AIza[0-9A-Za-z_\-]{35}')
+
+
+def _scrub(text: str) -> str:
+    """_redact, plus bare Google keys -- for text that is stored or audit-logged."""
+    return _GOOGLE_KEY_RE.sub('***REDACTED***', _redact(text))
 
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 # Ollama is opt-in (on-prem installs). Cloud uses Gemini. Empty default means an
@@ -453,11 +462,62 @@ def delete_gauge_reading(reading_id: int, user: dict = Depends(require_role('adm
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail='Reading not found')
+        prior = dict(row)
+        # The audit log is hash-chained, so anything written here is permanent --
+        # a key in the stored OCR text must not be copied into it.
+        if isinstance(prior.get('raw_ocr_text'), str):
+            prior['raw_ocr_text'] = _scrub(prior['raw_ocr_text'])
         audit.write(conn, 'delete_gauge_reading', user.get('username', ''), lab_id,
-                    json.dumps(dict(row)))
+                    json.dumps(prior))
         conn.execute("DELETE FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id])
         conn.commit()
         return {'deleted': reading_id}
+    finally:
+        conn.close()
+
+
+@router.post('/gauges/redact-secrets')
+def redact_stored_secrets(user: dict = Depends(require_role('admin'))):
+    """Apply today's redaction to OCR text stored before redaction existed.
+
+    Early readings can hold an upstream error message with an API key in it, and
+    GET /gauges returns that text to every logged-in user. There is no shell
+    access to the cloud database, so this is how it gets cleaned. Safe to run
+    more than once, and covers every lab in the database. Rotate the key as well
+    -- this does not reach copies that already left the database (backups taken
+    earlier, anyone who has read it).
+
+    `audit_entries_with_keys` counts audit entries that contain a key (a leaky
+    reading deleted before this ran). Those cannot be cleaned: the audit log is
+    hash-chained, so changing an entry would read as tampering.
+    """
+    cfg = get_config()
+    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    conn = get_conn(cfg['db_path'])
+    try:
+        changed = []
+        rows = conn.execute(
+            "SELECT id, raw_ocr_text FROM gauge_readings WHERE typeof(raw_ocr_text)='text' AND "
+            "(raw_ocr_text LIKE '%key=%' OR raw_ocr_text LIKE '%AIza%')").fetchall()
+        for row in rows:
+            cleaned = _scrub(row['raw_ocr_text'])
+            if cleaned != row['raw_ocr_text']:
+                conn.execute("UPDATE gauge_readings SET raw_ocr_text=? WHERE id=?", [cleaned, row['id']])
+                changed.append(row['id'])
+        in_audit = sum(
+            1 for (detail,) in conn.execute("SELECT detail FROM audit_log WHERE typeof(detail)='text'")
+            if _scrub(detail) != detail)
+        if changed:
+            # Ids only -- never the text, or the key would just move into the audit log.
+            audit.write(conn, 'redact_stored_secrets', user.get('username', ''), lab_id,
+                        json.dumps({'reading_ids': changed}))
+        conn.commit()
+        if changed:
+            # An UPDATE leaves the old text in freed pages and in the write-ahead log,
+            # and a backup copies the file as it is. Rebuild the file so it is gone.
+            conn.execute('VACUUM')
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        return {'redacted': len(changed), 'audit_entries_with_keys': in_audit}
     finally:
         conn.close()
 

@@ -13,9 +13,11 @@ import sqlite3
 import qrcode
 
 
-def fetch_gauges(db_path):
+def fetch_gauges(db_path, lab_id=None):
     """Return one dict per gauge: the latest reading, excluding rows with an
-    empty gauge_name or empty location."""
+    empty gauge_name or empty location. With lab_id, only that lab's gauges
+    (the cloud database holds a lab_id per reading)."""
+    lab_clause, params = ("AND lab_id = ?", [lab_id]) if lab_id is not None else ("", [])
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
@@ -24,9 +26,9 @@ def fetch_gauges(db_path):
             SELECT gauge_name, location, unit, value, alert_lo, alert_hi,
                    action_lo, action_hi, confidence, timestamp
             FROM gauge_readings
-            WHERE gauge_name != '' AND location != ''
+            WHERE gauge_name != '' AND location != '' """ + lab_clause + """
             ORDER BY timestamp ASC
-            """
+            """, params
         ).fetchall()
     finally:
         conn.close()

@@ -141,3 +141,19 @@ def test_a_first_run_is_reported_as_unchecked_and_an_empty_baseline_is_an_error(
         backup_cloud_db.read_previous_head(tmp_path)
     backup_cloud_db.write_head(tmp_path, 'a' * 64)
     assert backup_cloud_db.read_previous_head(tmp_path) == 'a' * 64
+
+
+def test_admin_can_see_how_their_request_reaches_the_server(db_path):  # noqa: F811
+    """Needed before turning on TRUST_FORWARDED_FOR: what does the proxy in front of
+    the server actually send?"""
+    with TestClient(main.app) as c:
+        r = c.get('/api/admin/client-address', headers={**_hdr(_ADMIN), 'X-Forwarded-For': '1.2.3.4, 203.0.113.7'})
+        _make_user(c, 'oscar', 'operator')
+        refused = c.get('/api/admin/client-address', headers=_hdr('oscar'))
+    assert r.status_code == 200
+    body = r.json()
+    assert body['x_forwarded_for'] == ['1.2.3.4, 203.0.113.7']
+    assert body['connecting_address'] == 'testclient'
+    assert body['counted_as_now'] == 'testclient'
+    assert body['counted_as_if_trusted'] == '203.0.113.7'
+    assert refused.status_code == 403
