@@ -127,18 +127,21 @@ def _alert_level(days: float, risk: float = None) -> str:
     model_risk (standalone Spearman rho up to -0.82 vs actual days, p<0.005)
     often still calibrates to a days number >14. Without this, that real
     signal never reached the alert level at all.
+
+    The result is the more severe of the two, so fewer days is never less
+    severe at the same risk (a strong risk used to give ORANGE past 14 days
+    but only YELLOW at 8-14).
     """
     if days <= 3:
         return 'RED'
     if days <= 7:
         return 'ORANGE'
+    if risk is not None and risk >= 0.85:
+        return 'ORANGE'
     if days <= 14:
         return 'YELLOW'
-    if risk is not None:
-        if risk >= 0.85:
-            return 'ORANGE'
-        if risk >= 0.7:
-            return 'YELLOW'
+    if risk is not None and risk >= 0.7:
+        return 'YELLOW'
     return 'GREEN'
 
 
