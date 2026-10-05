@@ -1,4 +1,5 @@
-"""In-process per-caller rate limiting for unauthenticated routes.
+"""In-process per-caller rate limiting: per address for unauthenticated routes,
+per user for logged-in routes that cost model time or money.
 
 Same shape as the login limiter in api/main.py: a one-minute window per key,
 held in memory, so it assumes a single server process (true for this app's
@@ -9,7 +10,7 @@ import os
 import threading
 import time
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 _MAX_TRACKED_KEYS = 1024   # bounds memory when a caller cycles through many addresses
 _MAX_KEY_LEN = 64
@@ -44,6 +45,13 @@ class PerMinuteCounter:
     def reset(self) -> None:
         with self._lock:
             self._counts.clear()
+
+
+def limit_per_minute(counter: PerMinuteCounter, key: str, limit: int) -> None:
+    """Count one event for this key; refuse it once the key is over its allowance."""
+    if counter.add(key[:_MAX_KEY_LEN]) > limit:
+        raise HTTPException(status_code=429, detail='Too many requests. Try again in a minute.',
+                            headers={'Retry-After': '60'})
 
 
 def _normalise(address: str) -> str:

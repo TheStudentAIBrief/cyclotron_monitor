@@ -14,11 +14,22 @@ from api.auth import get_current_user
 from api.config import get_config
 from api.db_cloud import get_conn
 from api.ollama_manager import ensure_running
+from api.ratelimit import PerMinuteCounter, limit_per_minute
 from models.predictor import UNVERIFIED_MODEL_WARNING
 from monitor.dashboard_writer import AVG_CYCLES
 
 router = APIRouter()
 _log = logging.getLogger('cyclotron.ask')
+
+# Per user, per minute. Each question keeps the model busy for a while, so one
+# account must not be able to queue them without limit.
+MAX_ASKS_PER_MINUTE = int(os.environ.get('ASK_MAX_PER_MIN', '20'))
+_asks = PerMinuteCounter()
+
+
+def reset_rate_limits() -> None:
+    _asks.reset()
+
 
 OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 LLM_MODEL = os.environ.get('AI_LLM_MODEL', 'mistral:7b')
@@ -230,6 +241,7 @@ def ask(req: AskRequest, user: dict = Depends(get_current_user)):
     question = req.question.strip()
     if not question:
         return {'answer': 'Please ask a question.', 'model': ''}
+    limit_per_minute(_asks, user.get('username', ''), MAX_ASKS_PER_MINUTE)
 
     try:
         ensure_running()

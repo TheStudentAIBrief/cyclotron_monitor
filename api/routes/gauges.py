@@ -19,11 +19,26 @@ from api.auth import get_current_user, require_role
 from api.config import get_config
 from api.db_cloud import get_conn
 from api.ollama_manager import ensure_running
+from api.ratelimit import PerMinuteCounter, limit_per_minute
 from monitor.eur_form_parser import EUR_OCR_PROMPT, EUR_OCR_SCHEMA, parse_eur_response
 from monitor.gauge_archive import archive_import
 
 router = APIRouter()
 _log = logging.getLogger('cyclotron.gauges')
+
+# Per user, per minute. Every photo is an OCR call (a paid one when cloud OCR is
+# on). A technician photographing gauges sends a few a minute; a form import is
+# one request carrying up to MAX_EUR_PHOTOS photos.
+MAX_OCR_PER_MINUTE = int(os.environ.get('OCR_MAX_PER_MIN', '60'))
+MAX_EUR_IMPORTS_PER_MINUTE = int(os.environ.get('EUR_IMPORTS_MAX_PER_MIN', '6'))
+_ocr_readings = PerMinuteCounter()
+_eur_imports = PerMinuteCounter()
+
+
+def reset_rate_limits() -> None:
+    _ocr_readings.reset()
+    _eur_imports.reset()
+
 
 # Defense in depth: gemini_ocr.call() now sends GEMINI_API_KEY via a header, not the
 # URL, so a real key should never reach an exception string here. Redact any `key=...`
@@ -258,6 +273,7 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
 @router.post('/gauges/reading')
 def process_photo_reading(req: PhotoRequest, user: dict = Depends(require_role('operator'))):
     """Accept a gauge photo, attempt OCR, store the reading, return the result."""
+    limit_per_minute(_ocr_readings, user.get('username', ''), MAX_OCR_PER_MINUTE)
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -538,6 +554,7 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(require_role('
             status_code=413,
             detail=f'Too many photos in one request (max {_MAX_EUR_PHOTOS}).',
         )
+    limit_per_minute(_eur_imports, user.get('username', ''), MAX_EUR_IMPORTS_PER_MINUTE)
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     archive_dir = os.path.join(os.path.dirname(cfg['db_path']), 'gauge_archive')
