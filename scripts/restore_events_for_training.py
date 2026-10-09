@@ -92,7 +92,7 @@ def restore(live_db: str, archives_dir: str, out_db: str) -> dict:
               f"VALUES ({','.join('?' * len(_EVENT_COLS))})")
     added = 0
     for fn in sorted(glob.glob(str(Path(archives_dir) / "*.csv.gz"))):
-        with gzip.open(fn, "rt") as fh:
+        with gzip.open(fn, "rt", encoding="utf-8") as fh:
             batch = [tuple(r.get(c) for c in _EVENT_COLS)
                      for r in csv.DictReader(fh) if _is_coded(r)]
         if batch:
