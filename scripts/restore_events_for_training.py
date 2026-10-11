@@ -25,6 +25,8 @@ SAFETY
 * Only *coded* rows (fault codes + the '(Warn 11001)' lifetime-counter messages)
   are restored — ~0.2% of archived rows — everything the fault/counter features
   need, without the multi-GB INFO-log noise.
+* The `daily_category` table (human-contact counts behind the humact_* features)
+  is rebuilt from every live and archived row, counted in passing, not restored.
 
 USAGE
 -----
@@ -43,7 +45,12 @@ import csv
 import glob
 import gzip
 import sqlite3
+import sys
+from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from aggregate_daily_categories import row_categories  # noqa: E402
 
 _EVENT_COLS = ("timestamp", "severity", "code", "function", "message", "source_file")
 
@@ -76,6 +83,25 @@ def restore(live_db: str, archives_dir: str, out_db: str) -> dict:
         "SELECT sql FROM live.sqlite_master WHERE name='events'"
     ).fetchone()[0]
     con.execute(events_ddl)
+
+    # Human-contact category counts (the humact_* features) need EVERY event row,
+    # not just the coded ones, so they are counted while streaming rather than
+    # restored: live rows first, then archived rows older than the live window
+    # (an archived row inside the live window would be the same event twice).
+    day_cat: dict = defaultdict(lambda: defaultdict(int))
+
+    def _count(ts, func, msg):
+        cats = row_categories(func, msg) if ts else None
+        if cats is None:
+            return
+        dc = day_cat[ts[:10]]
+        for cat in cats:
+            dc[cat] += 1
+
+    live_min = con.execute("SELECT MIN(timestamp) FROM live.events").fetchone()[0]
+    for ts, func, msg in con.execute("SELECT timestamp, function, message FROM live.events"):
+        _count(ts, func, msg)
+
     # coded rows currently live (recent retention window)
     con.execute(
         "INSERT OR IGNORE INTO events SELECT * FROM live.events "
@@ -92,21 +118,31 @@ def restore(live_db: str, archives_dir: str, out_db: str) -> dict:
               f"VALUES ({','.join('?' * len(_EVENT_COLS))})")
     added = 0
     for fn in sorted(glob.glob(str(Path(archives_dir) / "*.csv.gz"))):
+        batch = []
         with gzip.open(fn, "rt", encoding="utf-8") as fh:
-            batch = [tuple(r.get(c) for c in _EVENT_COLS)
-                     for r in csv.DictReader(fh) if _is_coded(r)]
+            for r in csv.DictReader(fh):
+                ts = r.get("timestamp")
+                if ts and (live_min is None or ts < live_min):
+                    _count(ts, r.get("function"), r.get("message"))
+                if _is_coded(r):
+                    batch.append(tuple(r.get(c) for c in _EVENT_COLS))
         if batch:
             con.executemany(insert, batch)
             added += len(batch)
     con.commit()
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_code_ts ON events(code, timestamp)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp)")
+    con.execute("CREATE TABLE daily_category "
+                "(date TEXT, category TEXT, count INTEGER, PRIMARY KEY(date, category))")
+    con.execute("CREATE INDEX idx_dailycat_date ON daily_category(date)")
+    con.executemany("INSERT INTO daily_category VALUES (?,?,?)",
+                    [(d, c, n) for d, cats in day_cat.items() for c, n in cats.items()])
     con.commit()
     total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     span = con.execute("SELECT MIN(timestamp), MAX(timestamp) FROM events").fetchone()
     con.close()
     return {"archived_added": added, "events_total": total,
-            "span": span, "out_db": str(out_path)}
+            "span": span, "out_db": str(out_path), "category_days": len(day_cat)}
 
 
 def main():
@@ -121,6 +157,7 @@ def main():
     print(f"Training DB: {result['out_db']}  "
           f"({result['events_total']} coded events, "
           f"span {result['span'][0]} -> {result['span'][1]})")
+    print(f"daily_category rebuilt for {result['category_days']} days (humact_* features).")
 
 
 if __name__ == "__main__":

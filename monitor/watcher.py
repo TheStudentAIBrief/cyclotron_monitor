@@ -12,6 +12,7 @@ from parsers.maintenance_labels import extract_maintenance_events, extract_from_
 from db import (init_db, upsert_beam_daily, insert_events, upsert_maintenance_event,
                 upsert_prediction, prune_events)
 from monitor.cloud_sync import sync_if_configured
+from scripts.aggregate_daily_categories import aggregate_recent
 
 _log = logging.getLogger('cyclotron.watcher')
 
@@ -76,6 +77,13 @@ def start_monitor(log_dir, db_path, model_dir, dashboard_path, alert_path):
             finally:
                 conn_r.close()
             target_date = date_type.fromisoformat(row_d[0]) if row_d and row_d[0] else date_type.today()
+
+            # The humact_* features read daily_category; keep it current. A failure
+            # here is safe: stale counts are reported as unknown, not as zero.
+            try:
+                aggregate_recent(db_path)
+            except Exception as e:
+                _log.error('daily_category aggregation failed: %s', e)
 
             preds = []
             for comp in COMPONENTS:
