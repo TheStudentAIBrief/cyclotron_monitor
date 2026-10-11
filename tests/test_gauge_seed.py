@@ -8,10 +8,16 @@ These tests fail (RED) if the seed is missing or incomplete,
 and pass (GREEN) after the import-csv seed has been applied.
 """
 
+import os
 import sqlite3
+from pathlib import Path
+
 import pytest
 
-DB = r"C:\Users\theol\cyclotron_monitor\data\cyclotron.db"
+DB = os.environ.get(
+    "GAUGE_SEED_DB_PATH",
+    str(Path(__file__).resolve().parent.parent / "data" / "cyclotron.db"),
+)
 LAB_ID = "petlabs-pretoria"
 
 # Exact register from pet-lab-gauge-app/build_dataset.py
@@ -33,6 +39,8 @@ REGISTER = {
 
 @pytest.fixture(scope="module")
 def conn():
+    if not Path(DB).exists():
+        pytest.skip(f"gauge seed DB not present at {DB} — set GAUGE_SEED_DB_PATH to override")
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     yield c
