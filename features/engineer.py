@@ -56,6 +56,9 @@ PETRACE_MIN_READINGS = {7: 1, 14: 2, 30: 3}
 # a precomputed daily_category table — see build_features. Additive; 0 when absent.
 HUMACT_CATEGORIES = ('struggle', 'power_state', 'operator_cmd', 'interlock',
                      'mode_change', 'service_manual', 'reset', 'tune_adjust')
+# daily_category older than this (relative to the prediction date) is treated as
+# unknown, not as zero activity. Beam days are not daily, so allow a few days' slack.
+HUMACT_STALE_DAYS = 7
 
 
 def _slope(values):
@@ -239,19 +242,28 @@ def build_features(target_date: date, component: str, db_path: str) -> dict:
         # (commands, resets, calibration, tuning) and the machine working harder
         # as parts wear (comms timeouts, excess power, ISC clamping, interlock
         # aborts, standby/shutdown). Read from a precomputed daily_category table
-        # (aggregated from the full event log) when present; absent (e.g. a live DB
-        # without the aggregation, or a test fixture) -> 0, purely additive.
+        # (aggregated from the full event log; kept current by aggregate_recent).
+        # If the table is missing, or its newest date is more than HUMACT_STALE_DAYS
+        # behind target_date, the counts are unknown, NOT zero: report NaN so a model
+        # trained on these features imputes a typical value instead of reading a
+        # falsely quiet machine (which could let the override stand an alarm down).
+        try:
+            newest_cat = conn.execute("SELECT MAX(date) FROM daily_category").fetchone()[0]
+        except sqlite3.OperationalError:
+            newest_cat = None
+        humact_known = bool(newest_cat) and newest_cat >= (
+            target_date - timedelta(days=HUMACT_STALE_DAYS)).isoformat()
         for w in (7, 14):
             cstart = (target_date - timedelta(days=w)).isoformat()
             for cat in HUMACT_CATEGORIES:
-                try:
-                    n = conn.execute(
-                        "SELECT COALESCE(SUM(count),0) FROM daily_category "
-                        "WHERE category=? AND date>=? AND date<?",
-                        [cat, cstart, target_date.isoformat()]
-                    ).fetchone()[0]
-                except sqlite3.OperationalError:
-                    n = 0
+                if not humact_known:
+                    features[f'humact_{cat}_{w}d'] = np.nan
+                    continue
+                n = conn.execute(
+                    "SELECT COALESCE(SUM(count),0) FROM daily_category "
+                    "WHERE category=? AND date>=? AND date<?",
+                    [cat, cstart, target_date.isoformat()]
+                ).fetchone()[0]
                 features[f'humact_{cat}_{w}d'] = int(n)
 
         last_maint = _last_maintenance_date(conn, component, before=target_date)

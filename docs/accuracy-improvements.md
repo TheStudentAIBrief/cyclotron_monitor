@@ -68,15 +68,50 @@ from a precomputed `daily_category` table. Walk-forward result: **false alarms 4
 detection 76%→78%, loose detection held 96%, 0 events lost** — applied to all components except
 BL2 (its 8 events overfit the extra features and it lost one real event; excluded).
 
-To make it work live you must **populate `daily_category`** — run
-`python scripts/aggregate_daily_categories.py --db <db>` alongside the beam_daily aggregation
-(inference needs only the last ~14 days, within retention; verified to reproduce the training
-counts exactly). Training uses the full restored history. Then retrain (Rung 2/3) — the models
-must be retrained with the features present to use them.
+`daily_category` is kept current automatically: the on-site monitor and `main.py predict`
+call `aggregate_recent()` before every prediction (it recounts only from the last counted
+day, never more than 15 days back, inside the 30-day event retention). For training,
+`scripts/restore_events_for_training.py` rebuilds the table for the whole history from the
+archives. The models must be retrained with the features present to use them.
+
+If the table is missing or more than 7 days behind the prediction date, the features are
+reported as unknown (NaN), not zero — see "Re-measured 11 October 2026" below for why.
 
 Finer physics-grounded signals (isc-clamp, comms-timeout, isc-raise at full resolution) were
 tested and gave **no gain** over the coarse categories — the ceiling for count-based features on
 54 maintenance events. Further accuracy needs more events or higher-resolution sensor values.
+
+## Re-measured 11 October 2026 (on `petbms-redesign` e3ea158) — read this before Rungs 2-4
+Same walk-forward backtest (345 predictions, 52 events; optimistic, the models have seen the
+whole history), fault history restored, models signed. The figures in Rungs 3 and 4 above do
+not hold on the current code:
+
+| Configuration | False alarms | Strict (<=30d) | Loose | Level acc. | Events missed |
+|---|---|---|---|---|---|
+| Current trainer, no humact | 51% | 81% | 94% | 59% | 3 (incl. BL2 2026-04-20) |
+| **Current trainer + humact, all components (adopted)** | 53% | 85% | 96% | 57% | 2 |
+| Same, humact excluded for BL2 | 51% | 85% | 94% | 58% | 3 (loses BL2 2026-04-20) |
+| Label window 10/21 + humact except BL2 | 35% | 78% | 96% | 70% | 2 |
+
+- **The false-alarm cut in Rungs 3-4 (41% -> 36%) came from the prototype's 10/21 label
+  window**, not from event-grouped CV or the features. Production has used 20/35 since
+  2026-07-03. Event-grouped CV gives results identical to the current trainer and was not
+  promoted.
+- **10/21 halves false alarms but four events lose their <=30-day warning** (BL1 Target 1
+  2025-05-07 and 2025-12-29, FOILS 2025-11-23, ION SOURCE 2025-05-09: last alarm 36-55 days
+  ahead instead of 3-18). Decision 2026-10-11 (Theo): keep 20/35.
+- **Excluding BL2 from humact is only right at 10/21.** At 20/35 it loses a real BL2 event, so
+  no component is excluded.
+- **Never deploy humact-trained models where `daily_category` is not being kept current.**
+  Measured with the previous code (missing table read as zero activity): detection fell from
+  96% to 87% and seven events were missed, because a falsely quiet machine let the override
+  stand alarms down. With unknown reported as NaN, detection stays at 96% (strict 78%).
+
+**Where training happens.** The cloud API never runs the predictor; predictions are made on
+the facility PC. So Rung 2's "upload to the Render disk" does nothing. To adopt this: on the
+facility PC, with `MODEL_HMAC_KEY` set, run `scripts/restore_events_for_training.py`, then
+train against the training DB (the `python -c` line in Rung 2, with that DB path) and restart
+the monitor. Unsigned models are refused.
 
 ## What was deliberately left out
 Cycle-constant recalibration (Ion 46→59, BL2 56→73): evaluated, improves MAE but carries its

@@ -66,6 +66,14 @@ def cmd_predict(cfg):
     target_date = date.fromisoformat(row[0]) if row and row[0] else date.today()
     print(f"Predicting as of {target_date} (last log date)")
 
+    # Keep the human-contact counts behind the humact_* features current.
+    try:
+        from scripts.aggregate_daily_categories import aggregate_recent
+        aggregate_recent(cfg['db_path'])
+    except Exception as e:
+        print(f"  WARNING: daily_category aggregation failed ({e}); humact features will be unknown",
+              file=sys.stderr)
+
     from models.counter import FOILS_LABELS
     COMPONENTS = ['ION SOURCE', 'FOILS', 'BL1 Target 1', 'BL2 Target 1', 'TRANSFER LINES']
     preds = []

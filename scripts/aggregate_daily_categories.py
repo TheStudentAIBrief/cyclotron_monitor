@@ -19,6 +19,7 @@ Inference only needs the last ~14 days, which the event retention window covers.
 import argparse
 import sqlite3
 from collections import defaultdict
+from datetime import date, timedelta
 
 # category -> substring triggers (cheap `in` checks). MUST match the training
 # substrate and features.engineer.HUMACT_CATEGORIES.
@@ -35,7 +36,27 @@ CATEGORIES = {
 _ITEMS = list(CATEGORIES.items())
 
 
-def aggregate(db_path: str, days: int | None = None) -> dict:
+def row_categories(func, msg):
+    """Categories one event row counts towards, or None if the row is filtered out.
+    The single definition of the row filter and triggers, shared with the training
+    restore (scripts/restore_events_for_training.py)."""
+    if not msg:
+        return None
+    # Same row filter as the training substrate: only non-numeric-telemetry
+    # rows (message starts with a letter) or explicit mode lines.
+    if not (msg[0].isalpha() or (func and 'mode' in func)):
+        return None
+    low = (msg + ' ' + (func or '')).lower()
+    return [cat for cat, trigs in _ITEMS if any(t in low for t in trigs)]
+
+
+# aggregate_recent() never recomputes further back than this. It must stay well
+# inside db.EVENTS_RETENTION_DAYS: a date the prune has started to delete would be
+# recounted too low. It also covers the 14-day feature window on a first run.
+RECENT_MAX_DAYS = 15
+
+
+def aggregate(db_path: str, days: int | None = None, since: str | None = None) -> dict:
     conn = sqlite3.connect(db_path, timeout=30)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS daily_category "
@@ -43,7 +64,10 @@ def aggregate(db_path: str, days: int | None = None) -> dict:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_dailycat_date ON daily_category(date)")
     where, params = "", []
-    if days is not None:
+    if since is not None:
+        # 'YYYY-MM-DD' sorts before every timestamp of that day; uses idx_events_ts.
+        where, params = "WHERE timestamp >= ?", [since]
+    elif days is not None:
         latest = conn.execute("SELECT MAX(date(timestamp)) FROM events").fetchone()[0]
         if latest:
             where = "WHERE date(timestamp) >= date(?, ?)"
@@ -54,20 +78,12 @@ def aggregate(db_path: str, days: int | None = None) -> dict:
         f"SELECT timestamp, function, message FROM events {where}", params
     )
     for ts, func, msg in cur:
-        if not ts or not msg:
+        cats = row_categories(func, msg) if ts else None
+        if cats is None:
             continue
-        # Same row filter as the training substrate: only non-numeric-telemetry
-        # rows (message starts with a letter) or explicit mode lines.
-        if not (msg[0].isalpha() or (func and 'mode' in func)):
-            continue
-        low = (msg + ' ' + (func or '')).lower()
-        d = ts[:10]
-        dc = day_cat[d]
-        for cat, trigs in _ITEMS:
-            for t in trigs:
-                if t in low:
-                    dc[cat] += 1
-                    break
+        dc = day_cat[ts[:10]]
+        for cat in cats:
+            dc[cat] += 1
 
     rows = [(d, c, n) for d, cats in day_cat.items() for c, n in cats.items()]
     # Replace the recomputed dates so re-runs are idempotent.
@@ -78,6 +94,27 @@ def aggregate(db_path: str, days: int | None = None) -> dict:
     n_days = len(day_cat)
     conn.close()
     return {"days": n_days, "rows": len(rows)}
+
+
+def aggregate_recent(db_path: str) -> dict:
+    """Bring daily_category up to date cheaply. Called before every live prediction.
+
+    Recounts from the last aggregated date (it may have been part-way through when
+    last counted) to the newest event, and never further back than RECENT_MAX_DAYS.
+    """
+    conn = sqlite3.connect(db_path, timeout=30)
+    try:
+        newest = conn.execute("SELECT MAX(timestamp) FROM events").fetchone()[0]
+        try:
+            last = conn.execute("SELECT MAX(date) FROM daily_category").fetchone()[0]
+        except sqlite3.OperationalError:
+            last = None  # table not created yet
+    finally:
+        conn.close()
+    if not newest:
+        return {"days": 0, "rows": 0}
+    floor = (date.fromisoformat(newest[:10]) - timedelta(days=RECENT_MAX_DAYS)).isoformat()
+    return aggregate(db_path, since=max(last, floor) if last else floor)
 
 
 def main():

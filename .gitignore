@@ -2,6 +2,8 @@
 # records subject to regulatory compliance. Must NOT be committed to any
 # remote repository.
 data/cyclotron.db
+# Training copy written by scripts/restore_events_for_training.py (same sensitivity)
+data/cyclotron_train.db
 
 # Generated files
 data/dashboard.json
