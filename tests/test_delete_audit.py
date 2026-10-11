@@ -17,12 +17,12 @@ import api.main as main  # noqa: E402
 from api.auth import get_current_user  # noqa: E402
 from api.db_cloud import get_conn, init_cloud_tables  # noqa: E402
 
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 'tester', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 'tester', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 
 def test_delete_writes_audit_entry_with_prior_content():
     # Set the actor at run-time (not import) so a sibling test module's override can't clobber it.
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 'tester', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 'tester', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
     db = os.environ['DATABASE_PATH']
     init_cloud_tables(db)
     conn = get_conn(db)

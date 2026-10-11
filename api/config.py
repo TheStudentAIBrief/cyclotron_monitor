@@ -28,5 +28,8 @@ def get_config() -> dict:
         cfg['lab_id'] = os.environ['LAB_ID']
     if os.environ.get('CLOUD_SYNC_KEY'):
         cfg['cloud_sync_key'] = os.environ['CLOUD_SYNC_KEY']
+    # A second key accepted alongside the first while the key is being rotated.
+    if os.environ.get('CLOUD_SYNC_KEY_NEXT'):
+        cfg['cloud_sync_key_next'] = os.environ['CLOUD_SYNC_KEY_NEXT']
 
     return cfg

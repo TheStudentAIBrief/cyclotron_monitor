@@ -26,6 +26,7 @@ os.environ.setdefault('DATABASE_PATH', _DB_PATH)
 # (mirrors tests/test_delete_audit.py's `db = os.environ['DATABASE_PATH']` pattern).
 _DB_PATH = os.environ['DATABASE_PATH']
 
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from api import config as _config  # noqa: E402
@@ -50,13 +51,6 @@ _ACTION_LO, _ACTION_HI = 0.2, 5.5
 # than one entry / more than one location group actually shows up.
 _GAUGE_2 = 'G-201'
 _LOCATION_2 = 'HVAC Room - Cyclotron HEPA'
-
-# GET /scan (the full-inventory index) requires a valid access token -- unlike
-# /scan/{gauge_name}, which stays deliberately unauthenticated for QR scanners.
-_INDEX_AUTH = {
-    'Authorization': f"Bearer {create_tokens('scan-index-tester', _LAB_ID)['access_token']}"
-}
-
 
 def _seed():
     init_cloud_tables(_DB_PATH)
@@ -98,12 +92,41 @@ def _seed():
             "VALUES (?,?,?,?,?,?)",
             [_LAB_ID, 'MMG005', '2026-06-30T09:00:00Z', 3.0, 'bar', ''],
         )
+        # _INDEX_AUTH's token is only honoured for an account that exists (see
+        # get_current_user) -- any role may view the index.
+        conn.execute(
+            "INSERT OR IGNORE INTO users (username, password_hash, role, created_at) "
+            "VALUES (?,?,?,?)",
+            ['scan-index-tester', 'unused-hash', 'viewer', '2026-06-30T00:00:00Z'],
+        )
         conn.commit()
     finally:
         conn.close()
 
 
 _seed()
+
+
+@pytest.fixture(autouse=True)
+def _lab_and_fresh_rate_limits(monkeypatch):
+    """/scan/{gauge} looks gauges up under the server's configured lab. These tests
+    used to get that from a developer's local config.json, so in a clean checkout
+    (no such file) the lab was 'default' and every single-gauge test got a 404.
+    Also start each test with a full rate-limit allowance."""
+    monkeypatch.setenv('LAB_ID', _LAB_ID)
+    _config.get_config.cache_clear()
+    scan.reset_rate_limits()
+    yield
+    scan.reset_rate_limits()
+    _config.get_config.cache_clear()
+
+
+# GET /scan (the full-inventory index) requires a valid access token -- unlike
+# /scan/{gauge_name}, which stays deliberately unauthenticated for QR scanners.
+# Minted after _seed(): a token is tied to an account that already exists.
+_INDEX_AUTH = {
+    'Authorization': f"Bearer {create_tokens('scan-index-tester', _LAB_ID)['access_token']}"
+}
 
 
 def test_scan_html_default_response():

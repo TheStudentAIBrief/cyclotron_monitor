@@ -138,12 +138,14 @@ def test_bootstrap_force_reset_logs_a_warning(tmp_path, monkeypatch, caplog):
     assert 'BOOTSTRAP_FORCE_RESET' in caplog.text
 
 
-def test_bootstrap_force_reset_without_valid_new_credentials_still_deletes_but_does_not_recreate(
+def test_bootstrap_force_reset_without_valid_new_credentials_keeps_the_existing_login(
     tmp_path, monkeypatch,
 ):
     # Edge case: force-reset is set but the new username/password are missing or
-    # too short - the stale file is still removed (so a corrected next boot can
-    # succeed) but nothing insecure gets written.
+    # too short - nothing insecure gets written, and the existing login is left
+    # alone. (It used to be deleted first, which locked everyone out until a
+    # corrected restart; a corrected next boot succeeds either way, because the
+    # flag is still set.)
     db_path = str(tmp_path / 'petlab.db')
     creds_path = tmp_path / '.credentials.json'
     creds_path.write_text(json.dumps({'username': 'old-user', 'hash': 'stale-hash'}))
@@ -153,7 +155,7 @@ def test_bootstrap_force_reset_without_valid_new_credentials_still_deletes_but_d
 
     auth.ensure_bootstrap_credentials(db_path)
 
-    assert not creds_path.exists()
+    assert json.loads(creds_path.read_text()) == {'username': 'old-user', 'hash': 'stale-hash'}
 
 
 def test_bootstrap_does_nothing_when_env_vars_unset(tmp_path, monkeypatch):

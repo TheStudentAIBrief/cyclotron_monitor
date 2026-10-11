@@ -13,7 +13,7 @@ import api.main as main  # noqa: E402
 from api.auth import get_current_user  # noqa: E402
 from api.db_cloud import get_conn, init_cloud_tables  # noqa: E402
 
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 
 def test_openapi_and_docs_are_disabled():

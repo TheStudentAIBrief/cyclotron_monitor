@@ -119,7 +119,7 @@ def test_photo_reading_no_backend_is_honest_and_saves_no_row(monkeypatch):
 
     monkeypatch.setattr(gemini_ocr, 'GEMINI_API_KEY', '')   # no Gemini
     monkeypatch.setattr(gauges, '_OLLAMA_MODEL', '')        # no Ollama
-    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
     db = os.environ['DATABASE_PATH']
     init_cloud_tables(db)

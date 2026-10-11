@@ -34,6 +34,10 @@ data/gauge_archive/
 # Raw gauge photos saved by the API on upload; not versioned.
 data/gauge_photos/
 
+# Cloud database backups pulled by scripts/backup_cloud_db.py — full copies of
+# the regulated data plus every account's password hash; never commit.
+backups/
+
 # Generated QR-code gauge label PDFs; not versioned.
 qr_labels/
 

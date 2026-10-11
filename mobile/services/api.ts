@@ -1,4 +1,5 @@
 import { getAccessToken, refreshAccessToken, logout } from './auth';
+import type { AskStatus } from './askStatus';
 import Config from '../constants/Config';
 import { BeamTrendRow, GaugeHistoryRow } from '../utils/dashboardWidgets';
 
@@ -135,13 +136,16 @@ async function request<T>(path: string, options: RequestInit = {}, timeout = Con
     }
   }
 
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     // Refresh failed, or there was never a usable token — force re-login
     // instead of surfacing a raw status. The retry above is not re-handled,
     // so this cannot infinite-loop.
     await logout();
     throw new Error('Session expired. Please log in again.');
   }
+  // A 403 is NOT handled above on purpose: it means this account's role isn't
+  // allowed to do this (see api/auth.py's require_role), so the session is
+  // still good — fall through and show the server's reason instead.
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { detail?: string };
@@ -254,7 +258,9 @@ export const getPETraceDashboard = () =>
 // ─── Ask AI ───────────────────────────────────────────────────────────────────
 
 export const askAI = (question: string) =>
-  request<{ answer: string; model: string }>('/api/ask', {
+  // status/generated_at: the real component status, read from the data by the
+  // server (not written by the model), shown next to every answer.
+  request<{ answer: string; model: string; status?: AskStatus[]; generated_at?: string | null }>('/api/ask', {
     method: 'POST',
     body: JSON.stringify({ question }),
   }, Config.API_ASK_TIMEOUT_MS);

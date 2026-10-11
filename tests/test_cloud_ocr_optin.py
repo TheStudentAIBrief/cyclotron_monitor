@@ -32,7 +32,7 @@ _FAKE_KEY = 'AIzaSyFAKE-not-a-real-key'
 def _as_user():
     prev = main.app.dependency_overrides.get(get_current_user)
     main.app.dependency_overrides[get_current_user] = (
-        lambda: {'username': 'optin-tester', 'lab_id': 'petlabs-pretoria'}
+        lambda: {'username': 'optin-tester', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
     )
     return prev
 

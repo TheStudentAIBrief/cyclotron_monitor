@@ -19,7 +19,7 @@ from api.auth import get_current_user  # noqa: E402
 from api.db_cloud import get_conn, init_cloud_tables  # noqa: E402
 from api.routes import gauges  # noqa: E402
 
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 
 def _csv_with_n_rows(n):

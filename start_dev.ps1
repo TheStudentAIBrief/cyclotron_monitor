@@ -11,6 +11,14 @@ param(
 $root = $PSScriptRoot
 if (-not $root) { $root = (Get-Location).Path }
 
+# DEV ONLY. This serves the API to every machine on the current network.
+if ($EnableTLS) {
+    Write-Warning "DEV ONLY: the API will be reachable by every device on this network."
+} else {
+    Write-Warning "DEV ONLY: the API will be reachable by every device on this network over plain HTTP."
+}
+Write-Warning "Never run this on the facility network. See docs/SECURITY_SETTINGS.md."
+
 # ── 1. Detect network IP ────────────────────────────────────────────────────
 
 function Get-WiFiIP {

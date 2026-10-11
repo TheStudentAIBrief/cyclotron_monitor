@@ -14,26 +14,50 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from api import gemini_ocr
-from api.auth import get_current_user
+from api import audit, gemini_ocr
+from api.auth import get_current_user, require_role
 from api.config import get_config
 from api.db_cloud import get_conn
 from api.ollama_manager import ensure_running
+from api.ratelimit import PerMinuteCounter, limit_per_minute
 from monitor.eur_form_parser import EUR_OCR_PROMPT, EUR_OCR_SCHEMA, parse_eur_response
 from monitor.gauge_archive import archive_import
 
 router = APIRouter()
 _log = logging.getLogger('cyclotron.gauges')
 
+# Per user, per minute. Every photo is an OCR call (a paid one when cloud OCR is
+# on). A technician photographing gauges sends a few a minute; a form import is
+# one request carrying up to MAX_EUR_PHOTOS photos.
+MAX_OCR_PER_MINUTE = int(os.environ.get('OCR_MAX_PER_MIN', '60'))
+MAX_EUR_IMPORTS_PER_MINUTE = int(os.environ.get('EUR_IMPORTS_MAX_PER_MIN', '6'))
+_ocr_readings = PerMinuteCounter()
+_eur_imports = PerMinuteCounter()
+
+
+def reset_rate_limits() -> None:
+    _ocr_readings.reset()
+    _eur_imports.reset()
+
+
 # Defense in depth: gemini_ocr.call() now sends GEMINI_API_KEY via a header, not the
 # URL, so a real key should never reach an exception string here. Redact any `key=...`
 # query fragment anyway before an upstream error message is returned to the client,
 # logged, or persisted into gauge_readings.raw_ocr_text below.
-_KEY_PARAM_RE = re.compile(r'([?&]key=)[^&\s\'"]+')
+_KEY_PARAM_RE = re.compile(r'([?&](?:api_)?key=)[^&\s\'"]+', re.IGNORECASE)
 
 
 def _redact(msg: str) -> str:
     return _KEY_PARAM_RE.sub(r'\1***REDACTED***', msg)
+
+
+# Google API keys as they appear bare in text (39 chars, 'AIza' prefix).
+_GOOGLE_KEY_RE = re.compile(r'AIza[0-9A-Za-z_\-]{35}')
+
+
+def _scrub(text: str) -> str:
+    """_redact, plus bare Google keys -- for text that is stored or audit-logged."""
+    return _GOOGLE_KEY_RE.sub('***REDACTED***', _redact(text))
 
 _OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 # Ollama is opt-in (on-prem installs). Cloud uses Gemini. Empty default means an
@@ -247,8 +271,9 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
 
 
 @router.post('/gauges/reading')
-def process_photo_reading(req: PhotoRequest, user: dict = Depends(get_current_user)):
+def process_photo_reading(req: PhotoRequest, user: dict = Depends(require_role('operator'))):
     """Accept a gauge photo, attempt OCR, store the reading, return the result."""
+    limit_per_minute(_ocr_readings, user.get('username', ''), MAX_OCR_PER_MINUTE)
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
@@ -290,7 +315,7 @@ def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
 
 
 @router.post('/gauges')
-def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(get_current_user)):
+def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(require_role('operator'))):
     """Submit a gauge reading entered manually (no photo required)."""
     # Reject inf/nan with a clean error — stored, they would corrupt the gauge-listing JSON.
     if not math.isfinite(req.value):
@@ -369,7 +394,7 @@ def list_gauges(
 @router.post('/gauges/import-csv')
 async def import_gauge_csv(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role('admin')),
 ):
     """Import gauge readings from the cofounder's gauge_readings.csv format.
 
@@ -438,7 +463,7 @@ async def import_gauge_csv(
 
 
 @router.delete('/gauges/{reading_id}')
-def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)):
+def delete_gauge_reading(reading_id: int, user: dict = Depends(require_role('admin'))):
     """Permanently delete a single gauge reading by ID.
 
     NNR audit: the deletion (actor + prior content) is recorded in audit_log *before*
@@ -453,14 +478,62 @@ def delete_gauge_reading(reading_id: int, user: dict = Depends(get_current_user)
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail='Reading not found')
-        ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
-        conn.execute(
-            "INSERT INTO audit_log (ts, action, lab_id, actor, detail) VALUES (?,?,?,?,?)",
-            [ts, 'delete_gauge_reading', lab_id, user.get('username', ''), json.dumps(dict(row))],
-        )
+        prior = dict(row)
+        # The audit log is hash-chained, so anything written here is permanent --
+        # a key in the stored OCR text must not be copied into it.
+        if isinstance(prior.get('raw_ocr_text'), str):
+            prior['raw_ocr_text'] = _scrub(prior['raw_ocr_text'])
+        audit.write(conn, 'delete_gauge_reading', user.get('username', ''), lab_id,
+                    json.dumps(prior))
         conn.execute("DELETE FROM gauge_readings WHERE id=? AND lab_id=?", [reading_id, lab_id])
         conn.commit()
         return {'deleted': reading_id}
+    finally:
+        conn.close()
+
+
+@router.post('/gauges/redact-secrets')
+def redact_stored_secrets(user: dict = Depends(require_role('admin'))):
+    """Apply today's redaction to OCR text stored before redaction existed.
+
+    Early readings can hold an upstream error message with an API key in it, and
+    GET /gauges returns that text to every logged-in user. There is no shell
+    access to the cloud database, so this is how it gets cleaned. Safe to run
+    more than once, and covers every lab in the database. Rotate the key as well
+    -- this does not reach copies that already left the database (backups taken
+    earlier, anyone who has read it).
+
+    `audit_entries_with_keys` counts audit entries that contain a key (a leaky
+    reading deleted before this ran). Those cannot be cleaned: the audit log is
+    hash-chained, so changing an entry would read as tampering.
+    """
+    cfg = get_config()
+    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    conn = get_conn(cfg['db_path'])
+    try:
+        changed = []
+        rows = conn.execute(
+            "SELECT id, raw_ocr_text FROM gauge_readings WHERE typeof(raw_ocr_text)='text' AND "
+            "(raw_ocr_text LIKE '%key=%' OR raw_ocr_text LIKE '%AIza%')").fetchall()
+        for row in rows:
+            cleaned = _scrub(row['raw_ocr_text'])
+            if cleaned != row['raw_ocr_text']:
+                conn.execute("UPDATE gauge_readings SET raw_ocr_text=? WHERE id=?", [cleaned, row['id']])
+                changed.append(row['id'])
+        in_audit = sum(
+            1 for (detail,) in conn.execute("SELECT detail FROM audit_log WHERE typeof(detail)='text'")
+            if _scrub(detail) != detail)
+        if changed:
+            # Ids only -- never the text, or the key would just move into the audit log.
+            audit.write(conn, 'redact_stored_secrets', user.get('username', ''), lab_id,
+                        json.dumps({'reading_ids': changed}))
+        conn.commit()
+        if changed:
+            # An UPDATE leaves the old text in freed pages and in the write-ahead log,
+            # and a backup copies the file as it is. Rebuild the file so it is gone.
+            conn.execute('VACUUM')
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        return {'redacted': len(changed), 'audit_entries_with_keys': in_audit}
     finally:
         conn.close()
 
@@ -471,7 +544,7 @@ class EurPhotosRequest(BaseModel):
 
 
 @router.post('/gauges/eur-photos')
-def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_user)):
+def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(require_role('admin'))):
     """Accept one or more EUR form photos (base64), run OCR, archive, and bulk-insert readings.
 
     Returns total readings inserted and any per-photo errors.
@@ -481,6 +554,7 @@ def import_eur_photos(req: EurPhotosRequest, user: dict = Depends(get_current_us
             status_code=413,
             detail=f'Too many photos in one request (max {_MAX_EUR_PHOTOS}).',
         )
+    limit_per_minute(_eur_imports, user.get('username', ''), MAX_EUR_IMPORTS_PER_MINUTE)
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     archive_dir = os.path.join(os.path.dirname(cfg['db_path']), 'gauge_archive')

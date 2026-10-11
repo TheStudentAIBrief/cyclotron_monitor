@@ -23,7 +23,7 @@ from api.auth import get_current_user
 from api.db_cloud import get_conn, init_cloud_tables
 from api.routes.admin_import import _MAX_ROWS_PER_REQUEST
 
-main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
 
 
 @pytest.fixture
@@ -183,4 +183,4 @@ def test_import_endpoints_require_auth(db_path):
             r = client.post('/api/admin/import/beam-daily', json={'rows': []})
         assert r.status_code == 401
     finally:
-        main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria'}
+        main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}

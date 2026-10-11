@@ -51,10 +51,13 @@ def test_get_live_context_survives_malformed_sync_payload(tmp_path, monkeypatch)
     conn.commit()
     conn.close()
 
-    context = ask._get_live_context(_config.get_config(), 'lab1')
-    assert 'X' * 300 in context
-    assert 'X' * 301 not in context
-    assert len(context) < 5000
+    dashboard = ask._load_dashboard(_config.get_config(), 'lab1')
+    context = ask._context(dashboard)
+    # None of the planted text is passed on (tests/test_ask_untrusted_data.py).
+    assert 'XXX' not in context and 'YYY' not in context and 'ignore' not in context
+    assert len(context) < 1000
+    status = ask._status(dashboard)
+    assert len(status) == 2 and all(len(s['name']) <= 60 for s in status)
 
 
 def test_overlong_question_is_rejected(tmp_path, monkeypatch):

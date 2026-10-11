@@ -4,12 +4,15 @@ import {
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { askAI } from '../../services/api';
+import { AskStatus, statusColor, statusText } from '../../services/askStatus';
 import { Colors } from '../../constants/Theme';
 
 export default function AskAIScreen() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [model, setModel] = useState('');
+  const [status, setStatus] = useState<AskStatus[]>([]);
+  const [generatedAt, setGeneratedAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const scrollRef = useRef<ScrollView>(null);
@@ -21,10 +24,14 @@ export default function AskAIScreen() {
     setAnswer('');
     setError('');
     setModel('');
+    setStatus([]);
+    setGeneratedAt('');
     try {
       const res = await askAI(q);
       setAnswer(res.answer);
       setModel(res.model);
+      setStatus(res.status ?? []);
+      setGeneratedAt(res.generated_at ?? '');
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'AI unavailable');
@@ -123,6 +130,25 @@ export default function AskAIScreen() {
             {model ? <Text style={styles.modelLabel}>{model}</Text> : null}
           </View>
         ) : null}
+
+        {/* The real status, read from the data by the server -- not written by the AI.
+            Shown with every answer so a wrong answer is never the only thing on screen. */}
+        {answer && status.length > 0 ? (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Current status</Text>
+            <Text style={styles.statusSub}>
+              Read directly from the monitoring data, not written by the AI
+              {generatedAt ? ` · ${generatedAt}` : ''}
+            </Text>
+            {status.map((s, i) => (
+              <View key={`${s.name}-${i}`} style={styles.statusRow}>
+                <View style={[styles.statusDot, { backgroundColor: statusColor(s.alert_level) }]} />
+                <Text style={styles.statusName} numberOfLines={1}>{s.name}</Text>
+                <Text style={[styles.statusLevel, { color: statusColor(s.alert_level) }]}>{statusText(s)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -207,4 +233,19 @@ const styles = StyleSheet.create({
   answerTitle: { color: Colors.primary, fontSize: 13, fontWeight: '700', marginBottom: 10 },
   answerText: { color: Colors.white, fontSize: 14, lineHeight: 22 },
   modelLabel: { color: '#444', fontSize: 11, marginTop: 12 },
+
+  statusCard: {
+    backgroundColor: Colors.surfaceDark,
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderDark,
+    marginTop: 12,
+  },
+  statusTitle: { color: Colors.white, fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  statusSub: { color: Colors.textMuted, fontSize: 11, marginBottom: 10 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
+  statusDot: { width: 9, height: 9, borderRadius: 5, marginRight: 10 },
+  statusName: { color: Colors.white, fontSize: 13, flex: 1 },
+  statusLevel: { fontSize: 13, fontWeight: '700', marginLeft: 10 },
 });
