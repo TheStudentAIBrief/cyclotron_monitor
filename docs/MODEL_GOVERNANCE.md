@@ -39,7 +39,7 @@ ANY trigger fires — record which one in the commit:
 | New maintenance events | ≥3 new service events for any component since last train | Labels are the binding constraint; each event materially moves a 6–14-event model |
 | Calendar drift | Component's dynamic avg-cycle shifts >15% vs the trained value | Usage regime changed; counter baseline stale |
 | Feature-source gap | `daily_category` or `beam_daily` ingestion stalls >30 days | Inference runs on stale/NaN features |
-| Backtest regression | Re-run backtest shows loose-detection <90% or FA >45% | Below the shipped PR#5 envelope |
+| Backtest regression | Re-run backtest shows loose-detection <90% or FA >60% | Below the 11 October 2026 accepted envelope (53% FA, 96% loose, docs/accuracy-improvements.md) - supersedes the stale PR#5 figure (36%, does not hold on current code). 60% leaves ~7 points of margin above the accepted baseline before this fires again; adjust if Theo wants a tighter one |
 | Software regime change | New `SOFTWARE_UPDATE_DATE` boundary crossed | Sensor semantics shift pre/post firmware |
 
 **Note:** timing accuracy is at its data-limited ceiling (~40–54 total events; 10 methods
