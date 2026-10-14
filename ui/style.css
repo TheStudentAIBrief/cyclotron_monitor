@@ -1,6 +1,7 @@
 body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
 h1 { color: #e0e0e0; font-size: 1.4em; margin-bottom: 4px; }
 .updated { color: #888; font-size: 0.85em; margin-bottom: 20px; }
+.advisory-notice { color: #888; font-size: 0.8em; font-style: italic; margin-bottom: 6px; }
 .card { background: #16213e; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .comp-name { font-size: 1.1em; font-weight: bold; display: flex; align-items: center; gap: 8px; }

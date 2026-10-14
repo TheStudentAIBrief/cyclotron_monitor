@@ -174,12 +174,14 @@ def _apply_model_override(final_days: float, final_risk: float,
         model_days > _OVERRIDE_MIN_MODEL_DAYS.
       * A genuinely faulting component raises model_risk and/or lowers model_days
         (fault codes elevate risk), so it is never downgraded -> detection preserved.
-    Leakage-controlled backtest (event-grouped-CV models, restored fault history):
-    false-alarm rate 61%->41%, level accuracy 53%->68%, loose detection held at
-    96%, strict detection 81%->80%. This is the same "smarter signal must not
-    silently suppress the alert" hazard that anomaly_score is deliberately barred
-    from (see models/anomaly.py) — the difference is this path is gated on the
-    model's own calibrated confidence and validated to preserve detection.
+    Backtest of 11 October 2026 (345 weekly predictions, 52 service events,
+    docs/accuracy-improvements.md): false alarms 53%, alert within 30 days
+    before service 85%, any alert in the 90 days before 96%, 2 events with no
+    alert. Optimistic - the models have seen this history. This is the same
+    "smarter signal must not silently suppress the alert" hazard that
+    anomaly_score is deliberately barred from (see models/anomaly.py) — the
+    difference is this path is gated on the model's own calibrated confidence
+    and validated to preserve detection.
     """
     would_alarm = _alert_level(final_days, risk=final_risk) in ('RED', 'ORANGE')
     if (would_alarm

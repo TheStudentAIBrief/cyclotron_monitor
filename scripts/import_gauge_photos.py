@@ -46,7 +46,16 @@ def _to_jpeg_bytes(raw: bytes, suffix: str) -> bytes:
 
 
 def process_images(image_map: dict[str, bytes], token: str, gauge_name: str, api: str):
-    """image_map: {filename: raw_bytes}. Returns list of result dicts."""
+    """image_map: {filename: raw_bytes}. Returns list of result dicts.
+
+    Two calls per photo (finding A8 follow-up, Claude review 13 Oct): since
+    POST /gauges/reading only OCRs and returns the value, never inserting a
+    row, this confirms every readable photo via POST /gauges so a bulk import
+    actually persists. The photo_ref it was issued is passed along so the
+    saved row keeps its photo link, and server-side threshold checking still
+    applies (same as the app's own confirm step). An unreadable photo
+    (ocr_ok false / value null) is reported as a failure, not confirmed.
+    """
     headers = {"Authorization": f"Bearer {token}"}
     results = []
     for name, raw in image_map.items():
@@ -55,10 +64,11 @@ def process_images(image_map: dict[str, bytes], token: str, gauge_name: str, api
         try:
             jpeg = _to_jpeg_bytes(raw, suffix)
             b64 = base64.b64encode(jpeg).decode()
+            reading_name = gauge_name or pathlib.Path(name).stem
             r = requests.post(
                 f"{api}/api/gauges/reading",
                 headers=headers,
-                json={"photo_b64": b64, "gauge_name": gauge_name or pathlib.Path(name).stem},
+                json={"photo_b64": b64, "gauge_name": reading_name},
                 # Matches the server's own Ollama fallback budget (ollama_timeout=600
                 # in api/routes/gauges.py's _run_ocr) — real CPU-bound local vision
                 # inference on a full photo can take several minutes.
@@ -70,7 +80,20 @@ def process_images(image_map: dict[str, bytes], token: str, gauge_name: str, api
             unit  = res.get('unit', '')
             ocr   = res.get('raw_ocr_text', '')
             print(f"value={value} {unit}  — {ocr[:80]}")
-            results.append({"file": name, "ok": True, **res})
+            if not res.get('ocr_ok') or value is None:
+                results.append({"file": name, "ok": False, "error": ocr or "no readable value"})
+                continue
+            confirm = requests.post(
+                f"{api}/api/gauges",
+                headers=headers,
+                json={
+                    "gauge_name": reading_name, "value": value, "unit": unit,
+                    "photo_ref": res.get('photo_path', ''), "raw_ocr_text": ocr,
+                },
+                timeout=60,
+            )
+            confirm.raise_for_status()
+            results.append({"file": name, "ok": True, **confirm.json()})
         except Exception as exc:
             print(f"ERROR: {exc}")
             results.append({"file": name, "ok": False, "error": str(exc)})

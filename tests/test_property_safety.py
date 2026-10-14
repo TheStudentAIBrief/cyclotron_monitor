@@ -6,8 +6,11 @@ test_blend.py / test_predictor.py. Hypothesis fuzzes the input space to try to
 break the invariants the code comments promise.
 
 Covers the catalogue gaps: "no property-based/random testing" (UQ software-
-testing fails) on exactly the code where an undetected edge case = a suppressed
-alarm on a nuclear installation.
+testing fails) on exactly the code where an undetected edge case = a missed
+advisory alert at a nuclear-regulated facility. PetBMS is advisory only - it
+does not control the cyclotron or replace site procedures - but a wrong alert
+is still a real cost to the operators who rely on it, which is why this logic
+gets property testing rather than only hand-picked cases.
 """
 from hypothesis import given, strategies as st
 from models.blend import blend_days_and_risk, _DAYS_THRESHOLD

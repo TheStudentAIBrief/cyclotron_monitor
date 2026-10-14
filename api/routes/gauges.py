@@ -150,6 +150,12 @@ class ManualReadingRequest(BaseModel):
     unit: str = ''
     is_alert: bool = False
     alert_reason: str = ''
+    # Server-issued filename from a prior POST /gauges/reading (finding A8
+    # follow-up, Claudia review 13 Oct): links the confirmed row back to its
+    # photo. Never a client-chosen path -- validated against the archive
+    # directory below, so a crafted value can't read/claim an arbitrary file.
+    photo_ref: str = ''
+    raw_ocr_text: str = ''
 
 
 def _parse_ocr_result(result: dict) -> dict:
@@ -272,31 +278,24 @@ def _save_photo(photo_b64: str, db_path: str) -> str:
 
 @router.post('/gauges/reading')
 def process_photo_reading(req: PhotoRequest, user: dict = Depends(require_role('operator'))):
-    """Accept a gauge photo, attempt OCR, store the reading, return the result."""
+    """Accept a gauge photo, attempt OCR, return the extracted value.
+
+    Never writes a row (finding A8, 12 October 2026 catalogue review): this
+    endpoint runs before the operator has seen or confirmed the value, so an
+    out-of-range OCR read always came back here with no threshold check and
+    was stored as NORMAL regardless - then stored again, correctly, when the
+    app posted the confirmed value to POST /gauges. One record per reading
+    now: this endpoint only returns the value and archives the photo;
+    POST /gauges (submit_manual_reading) is the only path that inserts, and
+    it already applies _latest_known_thresholds/_gauge_status there.
+    """
     limit_per_minute(_ocr_readings, user.get('username', ''), MAX_OCR_PER_MINUTE)
     cfg = get_config()
-    lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
     photo_path = _save_photo(req.photo_b64, cfg['db_path'])
     result = _run_ocr(req.photo_b64, req.gauge_name)
-    # No value read (backend failure or unreadable photo) → don't persist a phantom
-    # NULL row; the photo is still archived and the operator enters the value manually.
-    if result.get('value') is None:
-        return {'id': None, 'timestamp': ts, 'gauge_name': req.gauge_name,
-                'photo_path': photo_path, **result}
-    conn = get_conn(cfg['db_path'])
-    try:
-        cur = conn.execute(
-            "INSERT INTO gauge_readings "
-            "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, photo_path, raw_ocr_text) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            [lab_id, req.gauge_name, ts, result['value'], result['unit'],
-             int(result['is_alert']), result['alert_reason'], photo_path, result['raw_ocr_text']],
-        )
-        conn.commit()
-        return {'id': cur.lastrowid, 'timestamp': ts, 'gauge_name': req.gauge_name, **result}
-    finally:
-        conn.close()
+    return {'id': None, 'timestamp': ts, 'gauge_name': req.gauge_name,
+            'photo_path': photo_path, **result}
 
 
 def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
@@ -314,6 +313,24 @@ def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
     return row['alert_lo'], row['alert_hi'], row['action_lo'], row['action_hi']
 
 
+def _resolve_photo_ref(photo_ref: str, db_path: str) -> str:
+    """Validate a server-issued photo filename against the archive directory.
+
+    Never trust a client-supplied path (finding A8 follow-up, Claudia review 13
+    Oct): _save_photo already returns a bare, uuid-suffixed filename with no
+    directory component, so anything containing a path separator or '..', or
+    that doesn't exist on disk, is rejected rather than stored.
+    """
+    if not photo_ref:
+        return ''
+    if '/' in photo_ref or '\\' in photo_ref or '..' in photo_ref:
+        raise HTTPException(status_code=400, detail='invalid photo_ref')
+    photos_dir = os.path.join(os.path.dirname(db_path), 'gauge_photos')
+    if not os.path.isfile(os.path.join(photos_dir, photo_ref)):
+        raise HTTPException(status_code=400, detail='photo_ref not found')
+    return photo_ref
+
+
 @router.post('/gauges')
 def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(require_role('operator'))):
     """Submit a gauge reading entered manually (no photo required)."""
@@ -322,6 +339,7 @@ def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(requir
         raise HTTPException(status_code=422, detail='value must be a finite number')
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    photo_path = _resolve_photo_ref(req.photo_ref, cfg['db_path'])
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
     conn = get_conn(cfg['db_path'])
     try:
@@ -339,15 +357,15 @@ def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(requir
         cur = conn.execute(
             "INSERT INTO gauge_readings "
             "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, "
-            "alert_lo, alert_hi, action_lo, action_hi) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "alert_lo, alert_hi, action_lo, action_hi, photo_path, raw_ocr_text) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [lab_id, req.gauge_name, ts, req.value, req.unit, is_alert, alert_reason,
-             alert_lo, alert_hi, action_lo, action_hi],
+             alert_lo, alert_hi, action_lo, action_hi, photo_path, req.raw_ocr_text],
         )
         conn.commit()
         return {'id': cur.lastrowid, 'timestamp': ts, 'gauge_name': req.gauge_name,
                 'value': req.value, 'unit': req.unit, 'is_alert': bool(is_alert),
-                'alert_reason': alert_reason}
+                'alert_reason': alert_reason, 'photo_path': photo_path}
     finally:
         conn.close()
 

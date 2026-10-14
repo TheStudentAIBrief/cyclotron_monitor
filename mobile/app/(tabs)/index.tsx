@@ -206,6 +206,10 @@ function DashboardView({
         <Text style={dash.subtitleText}>{subtitle}</Text>
       </View>
 
+      <View style={dash.advisoryBanner}>
+        <Text style={dash.advisoryText}>Advisory only. Not a safety system. Follow site procedures.</Text>
+      </View>
+
       {isStale && (
         <View style={dash.staleBanner}>
           <Text style={dash.staleText}>⚠ Data may be stale — sync not recent</Text>
@@ -283,6 +287,8 @@ const dash = StyleSheet.create({
   titleRow: { paddingHorizontal: 16, paddingBottom: 8 },
   title: { color: Colors.white, fontSize: 18, fontWeight: '700' },
   subtitleText: { color: '#555', fontSize: 12, marginTop: 2 },
+  advisoryBanner: { paddingHorizontal: 16, paddingBottom: 8 },
+  advisoryText: { color: '#8aa', fontSize: 11, fontStyle: 'italic' },
   staleBanner: { backgroundColor: Colors.alertOrangeBg, paddingVertical: 8, paddingHorizontal: 16 },
   staleText: { color: Colors.alertOrange, fontSize: 12, textAlign: 'center' },
   errorBanner: { backgroundColor: Colors.alertRedBg, paddingVertical: 8, paddingHorizontal: 16 },

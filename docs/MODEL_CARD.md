@@ -28,8 +28,10 @@ Closes the "no model card / lineage / residual-risk documentation" audit gaps
 ## Evaluation
 - **Protocol:** walk-forward / event-grouped-CV backtest (`backtest.py`) — no future
   leakage. Metrics: MAE, loose/strict detection, level accuracy, false-alarm rate.
-- **Headline (validated):** false-alarm rate 60%→36% via override + human-contact
-  features (PR#5); loose detection held ~96%, 0 net events lost.
+- **Headline (re-measured 11 October 2026, `docs/accuracy-improvements.md`):** backtest of
+  345 weekly predictions and 52 service events. False alarms 53%. Alert within 30 days
+  before service: 85%. Any alert in the 90 days before: 96%. Two events had no alert.
+  The models had seen this history, so real performance will be lower.
 - **Honest limits:** event-grouped-CV precision 0.03–0.44 — classifier skill is weak.
   Timing prediction ties/loses to a do-nothing average-cycle baseline out-of-sample:
   the machine is **usage-scheduled**, so sensors carry little surprise-fault signal.
@@ -51,8 +53,8 @@ Closes the "no model card / lineage / residual-risk documentation" audit gaps
   (`_verify_checksum`, HMAC when `MODEL_HMAC_KEY` set).
 - Offline metrics ≠ measured online performance (cloud does not run the predictor).
 
-## Safety contract (tested)
-The blend/override/alert logic can never suppress a real alarm: risk is never lowered
-below either signal, override only ever downgrades a confidently-healthy calendar alarm,
-and a faulting component is never downgraded. Enforced by property tests
-(`tests/test_property_safety.py`, Hypothesis-fuzzed).
+## Alarm-override contract (tested)
+When the model is confident a part is healthy it stands down the calendar alarm. In the
+backtest this removed false alarms and left 2 of 52 services with no alert. Override only
+ever downgrades a confidently-healthy calendar alarm, never a faulting component. Enforced
+by property tests (`tests/test_property_safety.py`, Hypothesis-fuzzed).

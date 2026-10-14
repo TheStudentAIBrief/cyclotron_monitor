@@ -56,7 +56,7 @@ def write_dashboard(predictions, dashboard_path: str, alert_path: str):
         if pred.alert_level in ('RED', 'ORANGE'):
             days = int(pred.days_estimate)
             if pred.alert_level == 'RED':
-                action = "REPLACE NOW"
+                action = "Service due"
             else:
                 action = f"SCHEDULE THIS WEEK (~{days} days remaining)"
             alert_lines.append(f"{pred.component}: {action}")
