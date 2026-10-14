@@ -12,6 +12,7 @@ import { Colors } from '../../constants/Theme';
 
 export default function GaugesScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoRef, setPhotoRef] = useState<string>('');
   const [ocrText, setOcrText] = useState<string | null>(null);
   const [gaugeName, setGaugeName] = useState('');
   const [value, setValue] = useState('');
@@ -52,6 +53,9 @@ export default function GaugesScreen() {
     }
     setCapturing(true);
     setMessage(null);
+    // A new photo invalidates any reference from a previous one — never let a
+    // stale photo_ref attach to this reading (Claudia review, 13 Oct).
+    setPhotoRef('');
     try {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
@@ -67,6 +71,7 @@ export default function GaugesScreen() {
 
       setPhotoUri(result.assets[0].uri);
       const ocr = await submitGaugePhoto(result.assets[0].base64, gaugeName) as Record<string, unknown>;
+      setPhotoRef(typeof ocr.photo_path === 'string' ? ocr.photo_path : '');
       if (ocr.value != null) {
         setValue(String(ocr.value));
         if (ocr.unit) setUnit(String(ocr.unit));
@@ -108,10 +113,13 @@ export default function GaugesScreen() {
         unit: unit.trim(),
         is_alert: isAlert,
         alert_reason: alertReason.trim(),
+        photo_ref: photoRef || undefined,
+        raw_ocr_text: ocrText || undefined,
       });
       setMessage({ text: 'Reading saved.', ok: true });
       // Reset form
       setPhotoUri(null);
+      setPhotoRef('');
       setOcrText(null);
       setValue('');
       setUnit('');

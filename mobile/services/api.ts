@@ -173,6 +173,8 @@ export const submitManualGauge = (data: {
   unit: string;
   is_alert: boolean;
   alert_reason: string;
+  photo_ref?: string;
+  raw_ocr_text?: string;
 }) =>
   request('/api/gauges', { method: 'POST', body: JSON.stringify(data) });
 
