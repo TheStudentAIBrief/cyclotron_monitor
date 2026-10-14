@@ -136,3 +136,79 @@ def test_photo_reading_no_backend_is_honest_and_saves_no_row(monkeypatch):
 
     after = get_conn(db).execute("SELECT COUNT(*) AS n FROM gauge_readings").fetchone()['n']
     assert after == before                # no phantom NULL row saved
+
+
+def test_photo_reading_with_a_real_value_still_saves_no_row(tmp_path, monkeypatch):
+    """Finding A8 (12 October 2026 catalogue review): a photo reading used to
+    be inserted immediately by /gauges/reading, always as NORMAL (is_alert
+    hard-coded False in _parse_ocr_result, no threshold check at all) - so an
+    out-of-range photo read showed NORMAL until the operator pressed Save,
+    which then inserted a SECOND row, this one correctly checked against
+    thresholds. Now /gauges/reading only ever returns the value; the one row
+    that ends up on file is the confirmed one from POST /gauges, and it is the
+    one already proven correct by test_manual_reading_server_side_alert.py."""
+    db_path = str(tmp_path / 'a8.db')
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    from api import config as _config
+    _config.get_config.cache_clear()
+    import api.main as main
+    from api.auth import get_current_user
+    from api.routes import gauges
+    from api.db_cloud import get_conn, init_cloud_tables
+    from fastapi.testclient import TestClient
+
+    init_cloud_tables(db_path)
+    prev_override = main.app.dependency_overrides.get(get_current_user)
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
+    # A gauge with an alert_hi of 80 already on file - 95 is a real out-of-range
+    # reading, not a borderline one, so there's no ambiguity about what the old
+    # NORMAL-always insert got wrong.
+    conn = get_conn(db_path)
+    conn.execute(
+        "INSERT INTO gauge_readings (lab_id, gauge_name, timestamp, value, unit, "
+        "alert_lo, alert_hi, action_lo, action_hi) VALUES (?,?,?,?,?,?,?,?,?)",
+        ['petlabs-pretoria', '0200', '2026-01-01T00:00:00Z', 50.0, 'Pa', None, 80.0, None, 100.0],
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(
+        gauges, '_run_ocr',
+        lambda photo_b64, gauge_name='': {
+            'value': 95.0, 'unit': 'Pa', 'is_alert': False, 'alert_reason': '',
+            'raw_ocr_text': '0.9 confidence', 'ocr_ok': True,
+        },
+    )
+    try:
+        before = get_conn(db_path).execute("SELECT COUNT(*) AS n FROM gauge_readings").fetchone()['n']
+        with TestClient(main.app) as c:
+            r = c.post('/api/gauges/reading', json={'photo_b64': '/9j/abcd', 'gauge_name': '0200'})
+        assert r.status_code == 200
+        body = r.json()
+        assert body['value'] == 95.0
+        assert body['id'] is None
+        after = get_conn(db_path).execute("SELECT COUNT(*) AS n FROM gauge_readings").fetchone()['n']
+        assert after == before   # no row inserted just because OCR found a value
+
+        # Operator reviews and confirms it - this is the one and only insert,
+        # and it must come back ALERT (95 > alert_hi=80), not the NORMAL the
+        # old /gauges/reading insert would have locked in.
+        with TestClient(main.app) as c:
+            r = c.post('/api/gauges', json={
+                'gauge_name': '0200', 'value': 95.0, 'unit': 'Pa',
+                'is_alert': False, 'alert_reason': '',
+            })
+        assert r.status_code == 200
+        confirmed = r.json()
+        assert confirmed['is_alert'] is True
+        assert confirmed['alert_reason'] == 'ALERT'
+
+        rows = get_conn(db_path).execute(
+            "SELECT is_alert FROM gauge_readings WHERE gauge_name='0200' AND value=95.0"
+        ).fetchall()
+        assert len(rows) == 1          # exactly one row for this reading, not two
+        assert rows[0]['is_alert'] == 1
+    finally:
+        _config.get_config.cache_clear()
+        main.app.dependency_overrides.pop(get_current_user, None)
+        if prev_override is not None:
+            main.app.dependency_overrides[get_current_user] = prev_override

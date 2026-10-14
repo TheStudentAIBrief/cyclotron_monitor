@@ -62,6 +62,9 @@ export default function AskAIScreen() {
           <Text style={styles.cardSub}>
             Answers from live component data · powered by local AI (Ollama)
           </Text>
+          <Text style={styles.advisoryText}>
+            Advisory only. Not a safety system. Follow site procedures.
+          </Text>
 
           <TextInput
             style={styles.input}
@@ -169,7 +172,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cardTitle: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  cardSub: { color: Colors.textMuted, fontSize: 12, marginBottom: 14 },
+  cardSub: { color: Colors.textMuted, fontSize: 12, marginBottom: 4 },
+  advisoryText: { color: Colors.textMuted, fontSize: 11, fontStyle: 'italic', marginBottom: 14 },
 
   input: {
     backgroundColor: Colors.surfaceDarkAlt,

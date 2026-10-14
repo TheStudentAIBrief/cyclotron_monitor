@@ -116,4 +116,4 @@ the monitor. Unsigned models are refused.
 ## What was deliberately left out
 Cycle-constant recalibration (Ion 46→59, BL2 56→73): evaluated, improves MAE but carries its
 own ~2pp detection tradeoff and the override already does the work. Excluded to avoid trading
-detection on a safety system.
+away detection on an advisory tool operators rely on for timing.
