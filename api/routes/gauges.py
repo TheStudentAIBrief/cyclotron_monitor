@@ -150,6 +150,12 @@ class ManualReadingRequest(BaseModel):
     unit: str = ''
     is_alert: bool = False
     alert_reason: str = ''
+    # Server-issued filename from a prior POST /gauges/reading (finding A8
+    # follow-up, Claudia review 13 Oct): links the confirmed row back to its
+    # photo. Never a client-chosen path -- validated against the archive
+    # directory below, so a crafted value can't read/claim an arbitrary file.
+    photo_ref: str = ''
+    raw_ocr_text: str = ''
 
 
 def _parse_ocr_result(result: dict) -> dict:
@@ -307,6 +313,24 @@ def _latest_known_thresholds(conn, lab_id: str, gauge_name: str):
     return row['alert_lo'], row['alert_hi'], row['action_lo'], row['action_hi']
 
 
+def _resolve_photo_ref(photo_ref: str, db_path: str) -> str:
+    """Validate a server-issued photo filename against the archive directory.
+
+    Never trust a client-supplied path (finding A8 follow-up, Claudia review 13
+    Oct): _save_photo already returns a bare, uuid-suffixed filename with no
+    directory component, so anything containing a path separator or '..', or
+    that doesn't exist on disk, is rejected rather than stored.
+    """
+    if not photo_ref:
+        return ''
+    if '/' in photo_ref or '\\' in photo_ref or '..' in photo_ref:
+        raise HTTPException(status_code=400, detail='invalid photo_ref')
+    photos_dir = os.path.join(os.path.dirname(db_path), 'gauge_photos')
+    if not os.path.isfile(os.path.join(photos_dir, photo_ref)):
+        raise HTTPException(status_code=400, detail='photo_ref not found')
+    return photo_ref
+
+
 @router.post('/gauges')
 def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(require_role('operator'))):
     """Submit a gauge reading entered manually (no photo required)."""
@@ -315,6 +339,7 @@ def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(requir
         raise HTTPException(status_code=422, detail='value must be a finite number')
     cfg = get_config()
     lab_id = user.get('lab_id', cfg.get('lab_id', 'default'))
+    photo_path = _resolve_photo_ref(req.photo_ref, cfg['db_path'])
     ts = datetime.now(timezone.utc).isoformat(timespec='seconds')
     conn = get_conn(cfg['db_path'])
     try:
@@ -332,15 +357,15 @@ def submit_manual_reading(req: ManualReadingRequest, user: dict = Depends(requir
         cur = conn.execute(
             "INSERT INTO gauge_readings "
             "(lab_id, gauge_name, timestamp, value, unit, is_alert, alert_reason, "
-            "alert_lo, alert_hi, action_lo, action_hi) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "alert_lo, alert_hi, action_lo, action_hi, photo_path, raw_ocr_text) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [lab_id, req.gauge_name, ts, req.value, req.unit, is_alert, alert_reason,
-             alert_lo, alert_hi, action_lo, action_hi],
+             alert_lo, alert_hi, action_lo, action_hi, photo_path, req.raw_ocr_text],
         )
         conn.commit()
         return {'id': cur.lastrowid, 'timestamp': ts, 'gauge_name': req.gauge_name,
                 'value': req.value, 'unit': req.unit, 'is_alert': bool(is_alert),
-                'alert_reason': alert_reason}
+                'alert_reason': alert_reason, 'photo_path': photo_path}
     finally:
         conn.close()
 

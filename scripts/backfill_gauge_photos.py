@@ -3,9 +3,12 @@
 For most real-world imports, prefer scripts/import_gauge_photos.py instead --
 it downscales images to 1920px before OCR (avoiding Ollama context-size/memory
 issues on full-resolution phone photos) and goes through the live, authenticated
-/api/gauges/reading endpoint, which is the same code path a real submission
-takes. This script exists for cold-start seeding when the API server isn't
-running yet (writes to gauge_readings directly via api.db_cloud.get_conn).
+API (POST /api/gauges/reading to OCR, then POST /api/gauges to confirm and
+persist, since finding A8's fix split those into two steps). This script
+instead calls _run_ocr directly and inserts with is_alert hard-coded False
+(no threshold check) -- it exists only for cold-start seeding when the API
+server isn't running yet (writes to gauge_readings directly via
+api.db_cloud.get_conn), not as an equivalent code path.
 """
 import base64
 import sys

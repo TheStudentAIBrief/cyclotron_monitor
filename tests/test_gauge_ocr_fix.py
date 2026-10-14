@@ -186,29 +186,121 @@ def test_photo_reading_with_a_real_value_still_saves_no_row(tmp_path, monkeypatc
         body = r.json()
         assert body['value'] == 95.0
         assert body['id'] is None
+        photo_ref = body['photo_path']
+        assert photo_ref   # a real server-issued filename, needed for the linkage check below
         after = get_conn(db_path).execute("SELECT COUNT(*) AS n FROM gauge_readings").fetchone()['n']
         assert after == before   # no row inserted just because OCR found a value
 
         # Operator reviews and confirms it - this is the one and only insert,
         # and it must come back ALERT (95 > alert_hi=80), not the NORMAL the
-        # old /gauges/reading insert would have locked in.
+        # old /gauges/reading insert would have locked in. The photo_ref from
+        # the reading step must carry through onto the confirmed row (Claudia
+        # review, 13 Oct: A8 dropped photo linkage entirely).
         with TestClient(main.app) as c:
             r = c.post('/api/gauges', json={
                 'gauge_name': '0200', 'value': 95.0, 'unit': 'Pa',
                 'is_alert': False, 'alert_reason': '',
+                'photo_ref': photo_ref, 'raw_ocr_text': body['raw_ocr_text'],
             })
         assert r.status_code == 200
         confirmed = r.json()
         assert confirmed['is_alert'] is True
         assert confirmed['alert_reason'] == 'ALERT'
+        assert confirmed['photo_path'] == photo_ref
 
         rows = get_conn(db_path).execute(
-            "SELECT is_alert FROM gauge_readings WHERE gauge_name='0200' AND value=95.0"
+            "SELECT is_alert, photo_path, raw_ocr_text FROM gauge_readings "
+            "WHERE gauge_name='0200' AND value=95.0"
         ).fetchall()
         assert len(rows) == 1          # exactly one row for this reading, not two
         assert rows[0]['is_alert'] == 1
+        assert rows[0]['photo_path'] == photo_ref
+        assert rows[0]['raw_ocr_text'] == body['raw_ocr_text']
     finally:
         _config.get_config.cache_clear()
         main.app.dependency_overrides.pop(get_current_user, None)
         if prev_override is not None:
             main.app.dependency_overrides[get_current_user] = prev_override
+
+
+def test_photo_ref_rejects_path_traversal_and_unknown_files(tmp_path, monkeypatch):
+    """A client-supplied photo_ref must never be trusted as a path (Claudia review,
+    13 Oct): a traversal attempt or a filename that was never issued by this server
+    gets 400, not stored verbatim onto the row."""
+    db_path = str(tmp_path / 'traversal.db')
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    from api import config as _config
+    _config.get_config.cache_clear()
+    import api.main as main
+    from api.auth import get_current_user
+    from api.db_cloud import init_cloud_tables
+    from fastapi.testclient import TestClient
+
+    init_cloud_tables(db_path)
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
+    try:
+        with TestClient(main.app) as c:
+            for bad_ref in ('../../etc/passwd', '..\\..\\windows\\win.ini', '/etc/passwd', 'never_issued.jpg'):
+                r = c.post('/api/gauges', json={
+                    'gauge_name': '0300', 'value': 1.0, 'unit': 'Pa', 'photo_ref': bad_ref,
+                })
+                assert r.status_code == 400, bad_ref
+    finally:
+        _config.get_config.cache_clear()
+        main.app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_import_gauge_photos_script_persists_via_confirm_call(tmp_path, monkeypatch):
+    """Finding A8 follow-up (Claudia review, 13 Oct): scripts/import_gauge_photos.py
+    posts to /gauges/reading, which no longer inserts anything (A8's fix). Without
+    a confirm call the script silently loses every reading in a bulk import. This
+    runs the actual script function end to end against the real API + DB and counts
+    the rows that land."""
+    import io
+    db_path = str(tmp_path / 'import_script.db')
+    monkeypatch.setenv('DATABASE_PATH', db_path)
+    from api import config as _config
+    _config.get_config.cache_clear()
+    import api.main as main
+    from api.auth import get_current_user
+    from api.routes import gauges
+    from api.db_cloud import get_conn, init_cloud_tables
+    from fastapi.testclient import TestClient
+    from PIL import Image
+    import scripts.import_gauge_photos as import_script
+
+    init_cloud_tables(db_path)
+    main.app.dependency_overrides[get_current_user] = lambda: {'username': 't', 'lab_id': 'petlabs-pretoria', 'role': 'admin'}
+    monkeypatch.setattr(
+        gauges, '_run_ocr',
+        lambda photo_b64, gauge_name='': {
+            'value': 12.5, 'unit': 'Pa', 'is_alert': False, 'alert_reason': '',
+            'raw_ocr_text': 'high confidence', 'ocr_ok': True,
+        },
+    )
+
+    buf = io.BytesIO()
+    Image.new('RGB', (4, 4), color='blue').save(buf, format='JPEG')
+    image_map = {'g1.jpg': buf.getvalue(), 'g2.jpg': buf.getvalue()}
+
+    try:
+        with TestClient(main.app) as client:
+            def fake_post(url, headers=None, json=None, data=None, timeout=None):
+                if url.endswith('/api/gauges/reading'):
+                    return client.post('/api/gauges/reading', json=json)
+                if url.endswith('/api/gauges'):
+                    return client.post('/api/gauges', json=json)
+                raise AssertionError(f'unexpected URL in test: {url}')
+
+            monkeypatch.setattr(import_script.requests, 'post', fake_post)
+            results = import_script.process_images(image_map, token='tok', gauge_name='0400', api='http://testserver')
+
+        assert all(r['ok'] for r in results), results
+        rows = get_conn(db_path).execute(
+            "SELECT photo_path FROM gauge_readings WHERE gauge_name='0400'"
+        ).fetchall()
+        assert len(rows) == len(image_map)          # every readable photo actually persisted
+        assert all(row['photo_path'] for row in rows)   # and kept its photo link
+    finally:
+        _config.get_config.cache_clear()
+        main.app.dependency_overrides.pop(get_current_user, None)
